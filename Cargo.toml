@@ -5,7 +5,8 @@ edition = "2021"
 
 [dependencies]
 p256 = { version = "*", features = ["ecdh", "pem"] }
-rand_core = { version = "*", features = ["getrandom"] }
+rand_chacha = "*"
+rand_core = "*"
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.
