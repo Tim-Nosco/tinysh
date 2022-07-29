@@ -6,6 +6,7 @@ use std::fs::File;
 use std::io::Write;
 use std::os::unix::io::FromRawFd;
 use std::str::FromStr;
+use std::ffi::CStr;
 
 use p256::ecdh::EphemeralSecret;
 use p256::PublicKey;
@@ -13,7 +14,7 @@ use sha2::Sha256;
 use rand_chacha::ChaCha20Rng;
 use rand_core::{SeedableRng, RngCore, CryptoRng};
 use anyhow::{anyhow, Result};
-use thiserror::Error;
+// use thiserror::Error;
 
 #[allow(unused_imports)]
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -33,7 +34,7 @@ pub fn open64(pathname: *const i8, oflag: i32) -> i32 {
 
 // Get remote's public key appended the end of this ELF
 fn get_remote_key(filename: &str) -> Result<PublicKey> {
-    // TODO: actually read the final bytes of this file
+    // TODO: actually read from the tail of this file
     let test_str = "-----BEGIN PUBLIC KEY-----
 MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdojljdsw2oUJ/CoGn6p9Bs30yKPd
 pKK0Lb4fC+7c+9lnukYL5WOTsFzfUIZkGdrM5WyoEmDNISrh/mwzAB8m7w==
@@ -57,13 +58,16 @@ fn play_dh_kex<T: RngCore+CryptoRng, A: Write>(writeable: &mut A, pub_b: PublicK
 
 
 #[no_mangle]
-pub fn main(argc: i32, _argv: *const *const u8) {
+pub fn main(argc: i32, argv: *const *const u8) {
     // Setup
     let (mut stdout, mut _stdin) = (stdout(), stdin());
     let mut rng = ChaCha20Rng::from_entropy();
     
+    // TODO: use /proc/self/exe
     let pub_b = if argc > 0 {
-        get_remote_key(**_argv)
+        // Interpret argv0 as the filename for the current binary
+        let raw_argv0 = unsafe { CStr::from_ptr(*argv as *const i8) };
+        get_remote_key(raw_argv0.to_str().unwrap())
     } else {
         Err(anyhow!("Not enough arguments in argv"))
     }.expect("Failed to parse remote key");
