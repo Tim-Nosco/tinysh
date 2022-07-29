@@ -15,7 +15,7 @@ run apt-get update && apt-get install -y \
 workdir /build
 copy buildroot/ .
 # Use pre-configured settings
-copy config/buildroot.x86 .config
+copy config/buildroot.mipsel .config
 copy config/busybox-1.20.x.config /build/package/busybox/
 # Long make
 run make -j8
@@ -27,13 +27,14 @@ from ubuntu:22.04 as builder
 # Copy over the gcc and other build tools
 copy --from=0 /build/output/host/ /build/
 copy --from=0 /build/output/images/rootfs.tar /build/
-
 run cp -r -n /build/* /
 
+# Install rustup
 run apt update && apt install -y \
     curl
-
-run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
+    sh -s -- --default-toolchain none -y
+run /root/.cargo/bin/rustup toolchain install nightly --allow-downgrade --profile minimal --component rust-src
+run /root/.cargo/bin/rustup component add rust-src --toolchain nightly
 
 workdir /opt/tinysh
-# $ cargo +nightly build -Z build-std=std,panic_abort -Z build-std-features=panic_immediate_abort --target x86_64-unknown-linux-gnu --release
