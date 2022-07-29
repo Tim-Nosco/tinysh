@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Uncomment for a statically linked build
+# statically linked build
 export RUSTFLAGS='-C target-feature=+crt-static'
 
 export CC=mipsel-buildroot-linux-uclibc-gcc
