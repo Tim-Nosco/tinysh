@@ -4,7 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-libc = { version = "0.2", default-features = false }
+p256 = { version = "*", features = ["ecdh", "pem"] }
+rand_core = { version = "*", features = ["getrandom"] }
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.

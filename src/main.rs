@@ -1,19 +1,22 @@
-#![no_std]
 #![no_main]
 
-extern crate libc;
+use std::fs::File;
+use std::io::Write;
+use std::os::unix::io::FromRawFd;
 
-#[no_mangle]
-pub extern "C" fn main(_argc: isize, _argv: *const *const u8) -> isize {
-    // Since we are passing a C string the final null character is mandatory.
-    const HELLO: &'static str = "Hello, world!\n\0";
-    unsafe {
-        libc::printf(HELLO.as_ptr() as *const _);
-    }
-    0
+use p256::{EncodedPoint, PublicKey, ecdh::EphemeralSecret};
+use rand_core::OsRng;
+
+fn stdout() -> File {
+    unsafe { File::from_raw_fd(1) }
 }
 
-#[panic_handler]
-fn my_panic(_info: &core::panic::PanicInfo) -> ! {
-    loop {}
+#[no_mangle]
+pub fn main(_argc: i32, _argv: *const *const u8) {
+    let mut stdout = stdout();
+
+    let secret_a = EphemeralSecret::random(&mut OsRng);
+
+    let pub_a = secret_a.public_key().to_string();
+    stdout.write(pub_a.as_bytes()).unwrap();
 }
