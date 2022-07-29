@@ -7,6 +7,10 @@ edition = "2021"
 p256 = { version = "*", features = ["ecdh", "pem"] }
 rand_chacha = "*"
 rand_core = "*"
+libc = "*"
+anyhow = "*"
+sha2 = "*"
+aes-gcm = { version = "*", features = ["aes"] }
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.

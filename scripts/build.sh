@@ -12,3 +12,5 @@ cargo +nightly build \
     -Z build-std-features=panic_immediate_abort \
     --target mipsel-unknown-linux-uclibc \
     --release
+
+du -h ./target/mipsel-unknown-linux-uclibc/release/tinysh

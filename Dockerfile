@@ -29,9 +29,13 @@ copy --from=0 /build/output/host/ /build/
 copy --from=0 /build/output/images/rootfs.tar /build/
 run cp -r -n /build/* /
 
-# Install rustup
 run apt update && apt install -y \
-    curl
+    curl \
+    gcc \
+    file \
+    qemu-user-static
+
+# Install rustup
 run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- --default-toolchain none -y
 run /root/.cargo/bin/rustup toolchain install nightly --allow-downgrade --profile minimal --component rust-src
