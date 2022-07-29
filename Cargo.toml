@@ -9,6 +9,7 @@ rand_chacha = "*"
 rand_core = "*"
 libc = "*"
 anyhow = "*"
+thiserror = "*"
 sha2 = "*"
 aes-gcm = { version = "*", features = ["aes"] }
 
