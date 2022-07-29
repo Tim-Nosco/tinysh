@@ -35,6 +35,5 @@ run apt update && apt install -y \
 run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
     sh -s -- --default-toolchain none -y
 run /root/.cargo/bin/rustup toolchain install nightly --allow-downgrade --profile minimal --component rust-src
-run /root/.cargo/bin/rustup component add rust-src --toolchain nightly
 
 workdir /opt/tinysh

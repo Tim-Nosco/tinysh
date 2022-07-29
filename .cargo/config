@@ -1,2 +1,2 @@
 [target.mipsel-unknown-linux-uclibc]
-linker = "mipsel-linux-gcc"
+linker = "mipsel-buildroot-linux-uclibc-gcc"
