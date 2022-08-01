@@ -51,7 +51,6 @@ pub fn main(_argc: i32, _argv: *const *const u8, envp: *const *const u8) {
 
     // Get the shared AES key
     let key = play_dh_kex(&mut stdout, pub_b, &mut rng).expect("Failed KEX");
-    //stdout.write(format!("{:#?}", key).as_bytes()).unwrap();
 
     // Create a new rng for the challenge and nonce values
     rng = if 0 != rand_ptr {
