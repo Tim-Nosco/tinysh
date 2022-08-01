@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # statically linked build
-#export RUSTFLAGS='-C target-feature=+crt-static'
+export RUSTFLAGS='-C target-feature=+crt-static'
 
 export CC=mipsel-buildroot-linux-uclibc-gcc
 export CXX=mipsel-buildroot-linux-uclibc-g++
