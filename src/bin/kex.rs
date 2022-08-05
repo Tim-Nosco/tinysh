@@ -36,12 +36,20 @@ pub fn play_auth_challenge<T: RngCore + CryptoRng, A: Write + Read>(
     unimplemented!()
 }
 
-// Get remote's public key appended the end of this ELF
+// Get remote info from argv
 pub fn get_remote_info() -> Result<(IpAddr, PublicKey)> {
-    // TODO: actually read from the tail of this file
-    let test_str = "-----BEGIN PUBLIC KEY-----
-MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdojljdsw2oUJ/CoGn6p9Bs30yKPd
-pKK0Lb4fC+7c+9lnukYL5WOTsFzfUIZkGdrM5WyoEmDNISrh/mwzAB8m7w==
------END PUBLIC KEY-----";
-    Ok(("127.0.0.1".parse()?, PublicKey::from_str(test_str)?))
+    // Parse the IP
+    let argv1 = std::env::args()
+        .nth(1)
+        .ok_or(anyhow!("argv[1] must exist"))?;
+    let ip = argv1.parse()?;
+    // Parse the public key which should just be the base64 component on a single line
+    let argv2 = std::env::args()
+        .nth(2)
+        .ok_or(anyhow!("argv[2] must exist"))?;
+    let pubkey = PublicKey::from_str(&format!(
+        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+        argv2
+    ))?;
+    Ok((ip, pubkey))
 }

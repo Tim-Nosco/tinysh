@@ -32,11 +32,8 @@ pub fn main(_argc: i32, _argv: *const *const u8, envp: *const *const u8) {
     // Setup stdio
     let (mut stdout, mut _stdin) = (stdout(), stdin());
 
-    // Parse the elf header to find the tail of this executable.
-    //  This holds the remote's public key
-    let _page_sz = getauxval(envp, libc::AT_PAGESZ);
-    let _elf_base = getauxval(envp, libc::AT_BASE);
-    let _(ipaddr_b, pub_b) = get_remote_info().expect("Failed to parse remote pub key and ip addr");
+    // Parse the IP addr and public key from argv
+    let (_ipaddr_b, pub_b) = get_remote_info().expect("Failed to parse remote pub key and ip addr");
 
     // Seed the RNG
     // Prefer the auxiliary vector's random data entry for seeding
