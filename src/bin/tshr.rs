@@ -1,6 +1,8 @@
 #![no_main]
 
 extern crate libc;
+#[macro_use]
+extern crate lazy_static;
 mod auxv;
 mod kex;
 
@@ -15,14 +17,13 @@ use rand_core::SeedableRng;
 use std::fs::File;
 use std::os::unix::io::FromRawFd;
 use std::io::Write;
-use std::str::FromStr;
+use std::sync::Mutex;
+use std::ffi::CStr;
 
 // Define some functions to work around the uclibc tools
-fn stdout() -> File {
-    unsafe { File::from_raw_fd(1) }
-}
-fn stdin() -> File {
-    unsafe { File::from_raw_fd(0) }
+lazy_static! {
+    static ref STDIN: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(0) });
+    static ref STDOUT: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(1) });
 }
 #[no_mangle]
 pub fn open64(pathname: *const i8, oflag: i32) -> i32 {
@@ -30,20 +31,23 @@ pub fn open64(pathname: *const i8, oflag: i32) -> i32 {
 }
 
 #[no_mangle]
-pub fn main(_argc: i32, _argv: *const *const u8, envp: *const *const u8) -> i8 {
-    // Setup stdio
-    let (mut stdout, mut _stdin) = (stdout(), stdin());
+pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
+    // Build argv into rust vec
+    let argv_vec = unsafe {
+        let argv_vec_ptrs = std::slice::from_raw_parts(argv, argc as usize);
+        argv_vec_ptrs.iter().map( | x | { CStr::from_ptr(*x as *const i8).to_string_lossy().into_owned() }).collect()
+    };
 
     // Parse the IP addr and public key from argv
-    let (_ipaddr_b, pub_b) = get_remote_info().expect("Failed to parse remote pub key and ip addr");
-    stdout.write(format!("found key:\n{:#}\n", pub_b.to_string()).as_bytes()).unwrap();
+    let (_ipaddr_b, pub_b) = get_remote_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
+    STDOUT.lock().unwrap().write(format!("found key:\n{:#}\n", pub_b.to_string()).as_bytes()).unwrap();
 
     // Seed the RNG
     // Prefer the auxiliary vector's random data entry for seeding
     let rand_ptr = getauxval(envp, libc::AT_RANDOM as usize).unwrap_or(0);
     let mut rng = if 0 != rand_ptr {
         // Assuming everything worked out correctly, this dereference should be fine
-        // stdout.write(format!("{:#016x}\n", rand_ptr).as_bytes());
+        STDOUT.lock().unwrap().write(format!("deref rand bytes at: {:#016x}\n", rand_ptr).as_bytes()).unwrap();
         let imd = unsafe { *(rand_ptr as *const u64) };
         ChaCha20Rng::seed_from_u64(imd)
     } else {
@@ -54,7 +58,7 @@ pub fn main(_argc: i32, _argv: *const *const u8, envp: *const *const u8) -> i8 {
     // TODO: Open the socket to remote
 
     // Get the shared AES key
-    let key = play_dh_kex_local(&mut stdout, pub_b, &mut rng).expect("Failed KEX");
+    let key = play_dh_kex_local(&mut *STDOUT.lock().unwrap(), pub_b, &mut rng).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     rng = if 0 != rand_ptr {
@@ -64,7 +68,7 @@ pub fn main(_argc: i32, _argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Challenge the remote
-    play_auth_challenge_local(&mut stdout, &key, &mut rng).expect("Failed challenge");
+    play_auth_challenge_local(&mut *STDOUT.lock().unwrap(), &key, &mut rng).expect("Failed challenge");
 
     return 0;
 }

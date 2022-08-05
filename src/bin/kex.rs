@@ -7,6 +7,9 @@ use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::str::FromStr;
 
+#[allow(unused_imports)]
+use crate::STDOUT;
+
 // Conduct the ECDH key exchange
 pub fn play_dh_kex_local<T: RngCore + CryptoRng, A: Write>(
     writeable: &mut A,
@@ -54,16 +57,13 @@ fn format_public_key(b64_pem: &str) -> String {
 }
 
 // Get remote's info from argv
-pub fn get_remote_info() -> Result<(IpAddr, PublicKey)> {
+pub fn get_remote_info(argv: Vec<String>) -> Result<(IpAddr, PublicKey)> {
+    if argv.len() < 3 {
+        return Err(anyhow!("Expecting 2 arguments"));
+    }
     // Parse the IP
-    let argv1 = std::env::args()
-        .nth(1)
-        .ok_or(anyhow!("argv[1] must exist"))?;
-    let ip = argv1.parse()?;
+    let ip = argv[1].parse()?;
     // Parse the public key which should just be the base64 component on a single line
-    let argv2 = std::env::args()
-        .nth(2)
-        .ok_or(anyhow!("argv[2] must exist"))?;
-    let pubkey = PublicKey::from_str(&format_public_key(&argv2))?;
+    let pubkey = PublicKey::from_str(&format_public_key(&argv[2]))?;
     Ok((ip, pubkey))
 }
