@@ -8,7 +8,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 
 // Conduct the ECDH key exchange
-pub fn play_dh_kex<T: RngCore + CryptoRng, A: Write>(
+pub fn play_dh_kex_local<T: RngCore + CryptoRng, A: Write>(
     writeable: &mut A,
     pub_b: PublicKey,
     rng: &mut T,
@@ -27,8 +27,9 @@ pub fn play_dh_kex<T: RngCore + CryptoRng, A: Write>(
     Ok(key)
 }
 
+// Send a challenge to ensure the remote can use the expected private key
 #[allow(unused_variables)]
-pub fn play_auth_challenge<T: RngCore + CryptoRng, A: Write + Read>(
+pub fn play_auth_challenge_local<T: RngCore + CryptoRng, A: Write + Read>(
     sock: &mut A,
     key: &[u8; 32],
     rng: &mut T,
@@ -36,7 +37,23 @@ pub fn play_auth_challenge<T: RngCore + CryptoRng, A: Write + Read>(
     unimplemented!()
 }
 
-// Get remote info from argv
+// The ecdh library expects the PEM in a certain format
+//  use this function to convert from straight b64 to 
+//  the expected format.
+fn format_public_key(b64_pem: &str) -> String {
+    let nl_sep_pem = b64_pem.chars()
+        .enumerate()
+        .fold(String::new(), |acc, (i,c)|{
+            if i == 64 {
+                format!("{}\n{}", acc, c)
+            } else {
+                format!("{}{}", acc, c)
+            }
+        });
+    format!("-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----", nl_sep_pem)
+}
+
+// Get remote's info from argv
 pub fn get_remote_info() -> Result<(IpAddr, PublicKey)> {
     // Parse the IP
     let argv1 = std::env::args()
@@ -47,9 +64,6 @@ pub fn get_remote_info() -> Result<(IpAddr, PublicKey)> {
     let argv2 = std::env::args()
         .nth(2)
         .ok_or(anyhow!("argv[2] must exist"))?;
-    let pubkey = PublicKey::from_str(&format!(
-        "-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
-        argv2
-    ))?;
+    let pubkey = PublicKey::from_str(&format_public_key(&argv2))?;
     Ok((ip, pubkey))
 }
