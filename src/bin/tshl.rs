@@ -49,7 +49,8 @@ fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<()> {
     
     // Print out the public key for use in the remote client
     let pub_key = priv_key.public_key().to_string();
-    println!("{}", pub_key
+    println!("Use the following string in the remote's argv. \
+        This is your public key:\n{}", pub_key
         .replace("\n", "")
         .replace("-----BEGIN PUBLIC KEY-----", "")
         .replace("-----END PUBLIC KEY-----", ""));
@@ -70,7 +71,7 @@ fn main(){
     // Determine what subcommand we're using
     match &cli.command {
         Commands::KeyGen { out_file, in_file } => {
-            println!("Generating a new private key for use on the local machine:");
+            println!("Generating a new private key for use on the local machine.");
             keygen(out_file, in_file).expect("Failed key gen.");
         }
     }
