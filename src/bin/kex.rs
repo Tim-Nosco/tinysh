@@ -47,7 +47,7 @@ pub fn play_dh_kex_local<A: Write>(
 #[allow(unused_variables)]
 pub fn play_auth_challenge_local<T: RngCore + CryptoRng, A: Write + Read>(
     sock: &mut A,
-    key: &[u8; 32],
+    key: &PublicKey,
     rng: &mut T,
 ) -> Result<()> {
     unimplemented!()

@@ -1,5 +1,11 @@
 #!/bin/bash
 
-export KEY="MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAEdojljdsw2oUJ/CoGn6p9Bs30yKPdpKK0Lb4fC+7c+9lnukYL5WOTsFzfUIZkGdrM5WyoEmDNISrh/mwzAB8m7w=="
+set -e
+
+export KEY=$(cargo run --bin tshl -- key-gen -o key.priv)
+
+cargo run --bin tshl -- listen -k key.priv -a "127.0.0.1:2000" &
+
+sleep 1
 
 cargo run --bin tshr -- "127.0.0.1" ${KEY}

@@ -19,6 +19,7 @@ use std::os::unix::io::FromRawFd;
 use std::io::Write;
 use std::sync::Mutex;
 use std::ffi::CStr;
+use std::net::TcpStream;
 
 // Define some functions to work around the uclibc tools
 lazy_static! {
@@ -50,7 +51,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Parse the IP addr and public key from argv
-    let (_ipaddr_b, pub_b) = get_remote_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
+    let (ipaddr_b, pub_b) = get_remote_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
     STDOUT.lock().unwrap().write(format!("found key:\n{:#}\n", pub_b.to_string()).as_bytes()).unwrap();
 
     // Seed the RNG
@@ -58,10 +59,13 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let rand_ptr = getauxval(envp, libc::AT_RANDOM as usize).unwrap_or(0) as *const u64;
     let seed1 = get_rand_seed(rand_ptr);
 
-    // TODO: Open the socket to remote
+    // TODO: Register SIGALRM
+
+    // Open the socket to remote
+    let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_b)).expect("Unable to connect.");
 
     // Get the shared AES key
-    let key = play_dh_kex_local(&mut *STDOUT.lock().unwrap(), pub_b, seed1).expect("Failed KEX");
+    let key = play_dh_kex_local(&mut remote, pub_b, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
@@ -71,7 +75,9 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Challenge the remote
-    play_auth_challenge_local(&mut *STDOUT.lock().unwrap(), &key, &mut rng).expect("Failed challenge");
+    play_auth_challenge_local(&mut remote, &pub_b, &mut rng).expect("Failed challenge");
+
+    // TODO: unregister SIGALRM
 
     return 0;
 }
