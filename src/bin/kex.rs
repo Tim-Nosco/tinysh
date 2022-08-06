@@ -1,7 +1,8 @@
 use anyhow::{anyhow, Result};
 use p256::ecdh::EphemeralSecret;
 use p256::PublicKey;
-use rand_core::{CryptoRng, RngCore};
+use rand_core::{CryptoRng, RngCore, SeedableRng};
+use rand_chacha::ChaCha20Rng;
 use sha2::Sha256;
 use std::io::{Read, Write};
 use std::net::IpAddr;
@@ -10,14 +11,26 @@ use std::str::FromStr;
 #[allow(unused_imports)]
 use crate::STDOUT;
 
+
+pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
+    let rng = if let Some(imd) = seed{
+        // use the seed
+        ChaCha20Rng::seed_from_u64(imd)
+    } else {
+        // seed is not available, use /dev/urandom
+        ChaCha20Rng::from_entropy()
+    };
+    EphemeralSecret::random(rng)
+}
+
 // Conduct the ECDH key exchange
-pub fn play_dh_kex_local<T: RngCore + CryptoRng, A: Write>(
+pub fn play_dh_kex_local<A: Write>(
     writeable: &mut A,
     pub_b: PublicKey,
-    rng: &mut T,
+    seed: Option<u64>,
 ) -> Result<[u8; 32]> {
     // Generate local keys
-    let secret_a = EphemeralSecret::random(rng);
+    let secret_a = gen_key(seed);
     let pub_a = secret_a.public_key().to_string();
     writeable.write(pub_a.as_bytes())?;
 

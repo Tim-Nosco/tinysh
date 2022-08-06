@@ -1,6 +1,7 @@
 *.swp
 *.core
 *.gdb_history
+*.priv
 
 # Added by cargo
 

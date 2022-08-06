@@ -30,6 +30,17 @@ pub fn open64(pathname: *const i8, oflag: i32) -> i32 {
     unsafe { libc::open(pathname, oflag) }
 }
 
+fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
+    if 0 != rand_ptr as usize {
+        // Assuming everything worked out correctly, this dereference should be fine
+        STDOUT.lock().unwrap().write(format!("deref rand bytes at: {:#016x}\n", rand_ptr as usize).as_bytes()).unwrap();
+        Some(unsafe { *(rand_ptr) })
+    } else {
+        // getauxval(AT_RANDOM) is not available, use /dev/urandom
+        None
+    }
+}
+
 #[no_mangle]
 pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // Build argv into rust vec
@@ -44,25 +55,17 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
 
     // Seed the RNG
     // Prefer the auxiliary vector's random data entry for seeding
-    let rand_ptr = getauxval(envp, libc::AT_RANDOM as usize).unwrap_or(0);
-    let mut rng = if 0 != rand_ptr {
-        // Assuming everything worked out correctly, this dereference should be fine
-        STDOUT.lock().unwrap().write(format!("deref rand bytes at: {:#016x}\n", rand_ptr).as_bytes()).unwrap();
-        let imd = unsafe { *(rand_ptr as *const u64) };
-        ChaCha20Rng::seed_from_u64(imd)
-    } else {
-        // getauxval(AT_RANDOM) is not available, use /dev/urandom
-        ChaCha20Rng::from_entropy()
-    };
+    let rand_ptr = getauxval(envp, libc::AT_RANDOM as usize).unwrap_or(0) as *const u64;
+    let seed1 = get_rand_seed(rand_ptr);
 
     // TODO: Open the socket to remote
 
     // Get the shared AES key
-    let key = play_dh_kex_local(&mut *STDOUT.lock().unwrap(), pub_b, &mut rng).expect("Failed KEX");
+    let key = play_dh_kex_local(&mut *STDOUT.lock().unwrap(), pub_b, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
-    rng = if 0 != rand_ptr {
-        ChaCha20Rng::seed_from_u64(unsafe { *(rand_ptr as *const u64).add(1) })
+    let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
+        ChaCha20Rng::seed_from_u64(seed2)
     } else {
         ChaCha20Rng::from_entropy()
     };
