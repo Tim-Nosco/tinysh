@@ -17,7 +17,7 @@ clap = { version = "*", features = ["derive"] }
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.
-# panic = "abort"
+panic = "unwind"
 
 [profile.release]
 opt-level = "z"     # Optimize for size.
