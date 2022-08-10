@@ -3,6 +3,8 @@
 *.gdb_history
 *.priv
 
+*musl*
+
 # Added by cargo
 
 /target
