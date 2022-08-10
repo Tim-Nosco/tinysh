@@ -1,18 +1,17 @@
 #![allow(dead_code)]
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use std::path::PathBuf;
+use p256::SecretKey;
+use rand_core::OsRng;
 use std::fs::{File, OpenOptions};
 use std::io::Write;
-use std::os::unix::io::FromRawFd;
-use std::sync::Mutex;
-use anyhow::Result;
-use rand_core::OsRng;
-use p256::SecretKey;
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::os::unix::io::FromRawFd;
+use std::path::PathBuf;
+use std::sync::Mutex;
 
 #[macro_use]
 extern crate lazy_static;
-
 
 lazy_static! {
     static ref STDIN: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(0) });
@@ -53,15 +52,18 @@ fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<SecretKey> {
         // or make a new one
         SecretKey::random(&mut OsRng)
     };
-    
+
     // Print out the public key for use in the remote client
     let pub_key = priv_key.public_key().to_string();
     // println!("Use the following string in the remote's argv. \
     //    This is your public key:\n{}", pub_key
-    println!("{}", pub_key
-        .replace("\n", "")
-        .replace("-----BEGIN PUBLIC KEY-----", "")
-        .replace("-----END PUBLIC KEY-----", ""));
+    println!(
+        "{}",
+        pub_key
+            .replace("\n", "")
+            .replace("-----BEGIN PUBLIC KEY-----", "")
+            .replace("-----END PUBLIC KEY-----", "")
+    );
 
     // Write the private key to out_file
     OpenOptions::new()
@@ -72,7 +74,7 @@ fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<SecretKey> {
     Ok(priv_key)
 }
 
-fn handle_client(conn: TcpStream){
+async fn handle_client(conn: TcpStream) {
     // Accept the other side's public key and challenge
     // Calculate challenge response
     // Send response
@@ -80,10 +82,10 @@ fn handle_client(conn: TcpStream){
     // Poll on stdin and socket, encrypting or decrypting as needed
 }
 
-fn main(){
+fn main() {
     // Get the arguments
     let cli = Cli::parse();
-    
+
     // Determine what subcommand we're using
     match &cli.command {
         Commands::KeyGen { out_file, in_file } => {

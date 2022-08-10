@@ -2,10 +2,12 @@
 
 set -e
 
-export KEY=$(cargo run --bin tshl -- key-gen -o key.priv)
+export ARCH="--target ""$(rustc -vV | grep -oP '(?<=host: )\S+')"
 
-cargo run --bin tshl -- listen -k key.priv -a "127.0.0.1:2000" &
+export KEY=$(cargo run --bin tshl $ARCH -- key-gen -o key.priv)
+
+cargo run --bin tshl $ARCH -- listen -k key.priv -a "127.0.0.1:2000" &
 
 sleep 1
 
-cargo run --bin tshr -- "127.0.0.1" ${KEY}
+cargo run --bin tshr $ARCH -- "127.0.0.1" ${KEY}
