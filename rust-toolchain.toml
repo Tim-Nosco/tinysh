@@ -1,0 +1,5 @@
+[toolchain]
+channel = "nightly"
+components = [ "rust-src" ]
+targets = [ "x86_64-unknown-linux-gnu", "mipsel-unknown-linux-musl" ]
+profile = "minimal"
