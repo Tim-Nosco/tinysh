@@ -4,7 +4,7 @@ use clap::{Parser, Subcommand};
 use p256::SecretKey;
 use rand_core::OsRng;
 use std::fs::{File, OpenOptions};
-use std::io::Write;
+use std::io::{BufRead, BufReader, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
@@ -74,12 +74,15 @@ fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<SecretKey> {
     Ok(priv_key)
 }
 
-async fn handle_client(conn: TcpStream) {
+async fn handle_client<T: BufRead>(conn: &mut T) -> Result<()> {
     // Accept the other side's public key and challenge
+    let mut other_pub = Vec::new();
+    let _bytes_read = conn.read_until(b'\xff', &mut other_pub)?;
     // Calculate challenge response
     // Send response
     // Setup the shared secret
     // Poll on stdin and socket, encrypting or decrypting as needed
+    Ok(())
 }
 
 fn main() {
@@ -95,10 +98,12 @@ fn main() {
         Commands::Listen { address, key_file } => {
             // Start up a listener
             let sock = TcpListener::bind(address).expect("Failed to bind to address.");
-            // TODO: Thread the connection handler
+            // Thread the connection handler
             for conn in sock.incoming() {
                 if let Ok(conn_c) = conn {
-                    handle_client(conn_c);
+                    std::thread::spawn(|| {
+                        handle_client(&mut BufReader::new(conn_c));
+                    });
                 }
             }
         }

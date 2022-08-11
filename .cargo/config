@@ -3,8 +3,8 @@ linker = "mipsel-buildroot-linux-uclibc-gcc"
 
 [target.mipsel-unknown-linux-musl]
 linker = "mipsel-linux-musl-cross/bin/mipsel-linux-musl-gcc"
-rustflags = ["-Ctarget-feature=+crt-static", "-Zbuild-std-features=panic_immediate_abort"]
+rustflags = ["-Ctarget-feature=+crt-static"]
 
-[unstable]
+[target.mipsel-unknown-linux-musl.unstable]
 build-std = ["std", "core", "alloc", "panic_abort"]
-#build-std-features = ["panic_immediate_abort"]
+build-std-features = ["panic_immediate_abort"]
