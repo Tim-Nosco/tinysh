@@ -28,16 +28,17 @@ pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
     EphemeralSecret::random(rng)
 }
 
-// Conduct the ECDH key exchange
+// Conduct the ECDH key exchange on remote
 pub fn play_dh_kex_remote<A: Write>(
     writeable: &mut A,
     pub_l: &PublicKey,
     seed: Option<u64>,
 ) -> Result<[u8; 32]> {
-    // Generate local keys
+    // Generate remote's keys
     let secret_r = gen_key(seed);
     let pub_r = secret_r.public_key().to_string();
     let pub_r_fixed_size = format!("{:1$}", pub_r, 512);
+    // Send public key to local
     writeable.write(pub_r_fixed_size.as_bytes())?;
 
     // Calculate the shared secret
@@ -49,6 +50,7 @@ pub fn play_dh_kex_remote<A: Write>(
     Ok(key)
 }
 
+// Conduct ECDH key exchange on local
 pub fn play_dh_kex_local<T: Read + Write>(sock: &mut T, secret_l: &SecretKey) -> Result<[u8; 32]> {
     // Accept the other side's public key
     let mut other_pub = [0u8; 512];
@@ -66,7 +68,6 @@ pub fn play_dh_kex_local<T: Read + Write>(sock: &mut T, secret_l: &SecretKey) ->
 }
 
 // Send a challenge to ensure the local can use the expected private key
-#[allow(unused_variables)]
 pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     sock: &mut A,
     pub_l: &PublicKey,
@@ -75,6 +76,11 @@ pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     // send the challenge
     let mut challenge = [0u8; 128];
     rng.try_fill_bytes(&mut challenge)?;
+    STDOUT
+        .lock()
+        .unwrap()
+        .write(format!("Created challenge:\n{:02X?}\n", challenge).as_bytes())
+        .unwrap();
     sock.write(&challenge)?;
 
     // recv the signed challenge
@@ -84,7 +90,7 @@ pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     STDOUT
         .lock()
         .unwrap()
-        .write(format!("Recv'd local's signature:\n{:#}", signature).as_bytes())
+        .write(format!("Recv'd local's signature:\n{:#}\n", signature).as_bytes())
         .unwrap();
 
     // verify
@@ -110,6 +116,10 @@ pub fn play_auth_challenge_local<A: Write + Read>(
         signed_chal_b.len(),
         signed_chal
     );
+    // println!(
+    //     "{:?}",
+    //     VerifyingKey::from(secret_l.public_key()).verify(&challenge, &signed_chal)
+    // );
     sock.write(&signed_chal_b)?;
     Ok(())
 }

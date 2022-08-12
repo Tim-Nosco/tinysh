@@ -74,7 +74,8 @@ fn keygen(out_file: Option<&PathBuf>, in_file: &Option<PathBuf>) -> Result<Secre
     if let Some(out) = out_file {
         OpenOptions::new()
             .write(true)
-            .create_new(true)
+            .create(true)
+            .truncate(true)
             .open(out)?
             .write_all((*priv_key.to_pem(Default::default())?).as_bytes())?;
     }
@@ -82,12 +83,12 @@ fn keygen(out_file: Option<&PathBuf>, in_file: &Option<PathBuf>) -> Result<Secre
     Ok(priv_key)
 }
 
-fn handle_client<T: Read + Write>(conn: &mut T, s_key: &SecretKey) -> Result<()> {
+fn handle_client<T: Read + Write>(conn: &mut T, secret_l: &SecretKey) -> Result<()> {
     // Get the shared key
-    let key = play_dh_kex_local(conn, s_key)?;
+    let _key = play_dh_kex_local(conn, secret_l)?;
     // Respond to the challenge
-    play_auth_challenge_local(conn, s_key)?;
-    // Poll on stdin and socket, encrypting or decrypting as needed
+    play_auth_challenge_local(conn, secret_l)?;
+    // TODO Poll on stdin and socket, encrypting or decrypting as needed
     Ok(())
 }
 
