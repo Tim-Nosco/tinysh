@@ -70,7 +70,7 @@ fn format_public_key(b64_pem: &str) -> String {
 }
 
 // Get remote's info from argv
-pub fn get_local_info(argv: Vec<String>) -> Result<(IpAddr, PublicKey)> {
+pub fn get_remote_info(argv: Vec<String>) -> Result<(IpAddr, PublicKey)> {
     if argv.len() < 3 {
         return Err(anyhow!("Expecting 2 arguments"));
     }

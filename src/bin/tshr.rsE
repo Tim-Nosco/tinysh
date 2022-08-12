@@ -11,7 +11,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 #[allow(unused_imports)]
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
-use kex::{get_local_info, play_auth_challenge_remote, play_dh_kex_remote};
+use kex::{get_remote_info, play_auth_challenge_remote, play_dh_kex_remote};
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use std::fs::File;
@@ -51,7 +51,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Parse the IP addr and public key from argv
-    let (ipaddr_b, pub_b) = get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
+    let (ipaddr_b, pub_b) = get_remote_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
     STDOUT.lock().unwrap().write(format!("found key:\n{:#}\n", pub_b.to_string()).as_bytes()).unwrap();
 
     // Seed the RNG
