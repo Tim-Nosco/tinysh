@@ -2,7 +2,10 @@
 
 use anyhow::{anyhow, Result};
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
-use p256::ecdsa::{signature::Verifier, VerifyingKey};
+use p256::ecdsa::{
+    signature::{Signer, Verifier},
+    Signature, SigningKey, VerifyingKey,
+};
 use p256::{PublicKey, SecretKey};
 use rand_chacha::ChaCha20Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
@@ -66,16 +69,23 @@ pub fn play_dh_kex_local<T: Read + Write>(sock: &mut T, secret_l: &SecretKey) ->
 #[allow(unused_variables)]
 pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     sock: &mut A,
-    key: &PublicKey,
+    pub_l: &PublicKey,
     rng: &mut T,
 ) -> Result<()> {
     // send the challenge
     let mut challenge = [0u8; 128];
     rng.try_fill_bytes(&mut challenge)?;
     sock.write(&challenge)?;
-    // recv the signed challenge
 
-    unimplemented!()
+    // recv the signed challenge
+    let mut signature_raw = [0u8; 128];
+    sock.read_exact(&mut signature_raw)?;
+    let signature = Signature::from_str(std::str::from_utf8(&signature_raw)?)?;
+    println!("Recv'd local's signature:\n{:#}", signature);
+
+    // verify
+    VerifyingKey::from(pub_l).verify(&challenge, &signature)?;
+    Ok(())
 }
 
 // Sign challenge to authenticate
@@ -89,8 +99,14 @@ pub fn play_auth_challenge_local<A: Write + Read>(
     println!("Recv'd remote's challenge:\n{:02X?}", challenge);
 
     // sign the challenge
-
-    unimplemented!()
+    let signed_chal = SigningKey::from(secret_l).sign(&challenge).to_string();
+    println!(
+        "Generated signature of {} bytes:\n{:#}",
+        signed_chal.len(),
+        signed_chal
+    );
+    sock.write(&signed_chal.as_bytes())?;
+    Ok(())
 }
 
 // The ecdh library expects the PEM in a certain format
