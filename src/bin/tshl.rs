@@ -1,14 +1,19 @@
-#![allow(dead_code)]
+#![allow(dead_code, unused_imports)]
+
+mod kex;
+
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use p256::SecretKey;
 use rand_core::OsRng;
 use std::fs::{File, OpenOptions};
-use std::io::{BufRead, BufReader, Write};
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::sync::Mutex;
+
+use kex::{play_auth_challenge_local, play_dh_kex_local};
 
 #[macro_use]
 extern crate lazy_static;
@@ -44,7 +49,7 @@ enum Commands {
     },
 }
 
-fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<SecretKey> {
+fn keygen(out_file: Option<&PathBuf>, in_file: &Option<PathBuf>) -> Result<SecretKey> {
     // First, load the key
     let priv_key = if let Some(priv_key_path) = in_file {
         SecretKey::from_sec1_pem(&std::fs::read_to_string(priv_key_path)?)?
@@ -66,22 +71,22 @@ fn keygen(out_file: &PathBuf, in_file: &Option<PathBuf>) -> Result<SecretKey> {
     );
 
     // Write the private key to out_file
-    OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(out_file)?
-        .write_all((*priv_key.to_pem(Default::default())?).as_bytes())?;
+    if let Some(out) = out_file {
+        OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(out)?
+            .write_all((*priv_key.to_pem(Default::default())?).as_bytes())?;
+    }
+
     Ok(priv_key)
 }
 
-fn handle_client<T: BufRead>(conn: &mut T) -> Result<()> {
-    // Accept the other side's public key and challenge
-    let mut other_pub = Vec::new();
-    let _bytes_read = conn.read_until(b'\xff', &mut other_pub)?;
-    println!("Got {} bytes", _bytes_read);
-    // Calculate challenge response
-    // Send response
-    // Setup the shared secret
+fn handle_client<T: Read + Write>(conn: &mut T, s_key: &SecretKey) -> Result<()> {
+    // Get the shared key
+    let key = play_dh_kex_local(conn, s_key)?;
+    // Respond to the challenge
+    play_auth_challenge_local(conn, s_key)?;
     // Poll on stdin and socket, encrypting or decrypting as needed
     Ok(())
 }
@@ -94,16 +99,19 @@ fn main() {
     match &cli.command {
         Commands::KeyGen { out_file, in_file } => {
             // println!("Generating a new private key for use on the local machine.");
-            keygen(out_file, in_file).expect("Failed key gen.");
+            keygen(Some(out_file), in_file).expect("Failed key gen.");
         }
         Commands::Listen { address, key_file } => {
+            // Read in the keyfile
+            let key = keygen(None, key_file).expect("Failed to read key.");
             // Start up a listener
             let sock = TcpListener::bind(address).expect("Failed to bind to address.");
             // Thread the connection handler
             for conn in sock.incoming() {
-                if let Ok(conn_c) = conn {
-                    std::thread::spawn(|| {
-                        handle_client(&mut BufReader::new(conn_c)).ok();
+                if let Ok(mut conn_c) = conn {
+                    let tkey = key.clone();
+                    std::thread::spawn(move || {
+                        handle_client(&mut conn_c, &tkey).ok();
                     });
                 }
             }

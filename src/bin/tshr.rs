@@ -14,12 +14,12 @@ use auxv::getauxval;
 use kex::{get_local_info, play_auth_challenge_remote, play_dh_kex_remote};
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-use std::fs::File;
-use std::os::unix::io::FromRawFd;
-use std::io::Write;
-use std::sync::Mutex;
 use std::ffi::CStr;
+use std::fs::File;
+use std::io::Write;
 use std::net::TcpStream;
+use std::os::unix::io::FromRawFd;
+use std::sync::Mutex;
 
 // Define some functions to work around the uclibc tools
 lazy_static! {
@@ -34,7 +34,11 @@ pub fn open64(pathname: *const i8, oflag: i32) -> i32 {
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
     if 0 != rand_ptr as usize {
         // Assuming everything worked out correctly, this dereference should be fine
-        STDOUT.lock().unwrap().write(format!("deref rand bytes at: {:#016x}\n", rand_ptr as usize).as_bytes()).unwrap();
+        STDOUT
+            .lock()
+            .unwrap()
+            .write(format!("deref rand bytes at: {:#016x}\n", rand_ptr as usize).as_bytes())
+            .unwrap();
         Some(unsafe { *(rand_ptr) })
     } else {
         // getauxval(AT_RANDOM) is not available, use /dev/urandom
@@ -47,12 +51,24 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // Build argv into rust vec
     let argv_vec = unsafe {
         let argv_vec_ptrs = std::slice::from_raw_parts(argv, argc as usize);
-        argv_vec_ptrs.iter().map( | x | { CStr::from_ptr(*x as *const i8).to_string_lossy().into_owned() }).collect()
+        argv_vec_ptrs
+            .iter()
+            .map(|x| {
+                CStr::from_ptr(*x as *const i8)
+                    .to_string_lossy()
+                    .into_owned()
+            })
+            .collect()
     };
 
     // Parse the IP addr and public key from argv
-    let (ipaddr_b, pub_b) = get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
-    STDOUT.lock().unwrap().write(format!("found key:\n{:#}\n", pub_b.to_string()).as_bytes()).unwrap();
+    let (ipaddr_b, pub_b) =
+        get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
+    STDOUT
+        .lock()
+        .unwrap()
+        .write(format!("Found local's key:\n{:#}\n", pub_b.to_string()).as_bytes())
+        .unwrap();
 
     // Seed the RNG
     // Prefer the auxiliary vector's random data entry for seeding
@@ -65,7 +81,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_b)).expect("Unable to connect.");
 
     // Get the shared AES key
-    let key = play_dh_kex_remote(&mut remote, pub_b, seed1).expect("Failed KEX");
+    let key = play_dh_kex_remote(&mut remote, &pub_b, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {

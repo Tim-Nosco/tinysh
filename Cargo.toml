@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-p256 = { version = "*", features = ["ecdh", "pem"] }
+p256 = { version = "*", features = ["ecdh", "ecdsa", "pem"] }
 rand_chacha = "*"
 rand_core = "*"
 libc = "*"
