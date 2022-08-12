@@ -62,12 +62,12 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Parse the IP addr and public key from argv
-    let (ipaddr_b, pub_b) =
+    let (ipaddr_l, pub_l) =
         get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
     STDOUT
         .lock()
         .unwrap()
-        .write(format!("Found local's key:\n{:#}\n", pub_b.to_string()).as_bytes())
+        .write(format!("Found local's key:\n{:#}\n", pub_l.to_string()).as_bytes())
         .unwrap();
 
     // Seed the RNG
@@ -78,10 +78,10 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // TODO: Register SIGALRM
 
     // Open the socket to remote
-    let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_b)).expect("Unable to connect.");
+    let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_l)).expect("Unable to connect.");
 
     // Get the shared AES key
-    let key = play_dh_kex_remote(&mut remote, &pub_b, seed1).expect("Failed KEX");
+    let key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
@@ -91,7 +91,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     };
 
     // Challenge the remote
-    play_auth_challenge_remote(&mut remote, &pub_b, &mut rng).expect("Failed challenge");
+    play_auth_challenge_remote(&mut remote, &pub_l, &mut rng).expect("Failed challenge");
 
     // TODO: unregister SIGALRM
 

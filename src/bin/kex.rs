@@ -3,8 +3,8 @@
 use anyhow::{anyhow, Result};
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
 use p256::ecdsa::{
-    signature::{Signer, Verifier},
-    Signature, SigningKey, VerifyingKey,
+    signature::{Signature, Signer, Verifier},
+    SigningKey, VerifyingKey,
 };
 use p256::{PublicKey, SecretKey};
 use rand_chacha::ChaCha20Rng;
@@ -78,10 +78,14 @@ pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     sock.write(&challenge)?;
 
     // recv the signed challenge
-    let mut signature_raw = [0u8; 128];
+    let mut signature_raw = [0u8; 64];
     sock.read_exact(&mut signature_raw)?;
-    let signature = Signature::from_str(std::str::from_utf8(&signature_raw)?)?;
-    println!("Recv'd local's signature:\n{:#}", signature);
+    let signature = Signature::from_bytes(&signature_raw)?;
+    STDOUT
+        .lock()
+        .unwrap()
+        .write(format!("Recv'd local's signature:\n{:#}", signature).as_bytes())
+        .unwrap();
 
     // verify
     VerifyingKey::from(pub_l).verify(&challenge, &signature)?;
@@ -99,13 +103,14 @@ pub fn play_auth_challenge_local<A: Write + Read>(
     println!("Recv'd remote's challenge:\n{:02X?}", challenge);
 
     // sign the challenge
-    let signed_chal = SigningKey::from(secret_l).sign(&challenge).to_string();
+    let signed_chal = SigningKey::from(secret_l).sign(&challenge);
+    let signed_chal_b = signed_chal.as_bytes();
     println!(
         "Generated signature of {} bytes:\n{:#}",
-        signed_chal.len(),
+        signed_chal_b.len(),
         signed_chal
     );
-    sock.write(&signed_chal.as_bytes())?;
+    sock.write(&signed_chal_b)?;
     Ok(())
 }
 
