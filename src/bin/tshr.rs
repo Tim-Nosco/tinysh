@@ -5,6 +5,7 @@ extern crate libc;
 extern crate lazy_static;
 mod auxv;
 mod kex;
+mod relay;
 
 #[allow(unused_imports)]
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -20,6 +21,9 @@ use std::io::Write;
 use std::net::TcpStream;
 use std::os::unix::io::FromRawFd;
 use std::sync::Mutex;
+
+#[allow(unused_imports)]
+use relay::{relay, RelayNode};
 
 // Define some functions to work around the uclibc tools
 lazy_static! {
@@ -81,7 +85,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_l)).expect("Unable to connect.");
 
     // Get the shared AES key
-    let key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
+    let _key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {

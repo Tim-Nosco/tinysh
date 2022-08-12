@@ -1,4 +1,4 @@
-#![allow(unused_variables, dead_code, unused_imports)]
+#![allow(dead_code)]
 
 use anyhow::{anyhow, Result};
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
