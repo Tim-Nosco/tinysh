@@ -91,11 +91,11 @@ fn handle_client(conn: &mut TcpStream, secret_l: &SecretKey) -> Result<()> {
     // Respond to the challenge
     play_auth_challenge_local(conn, secret_l)?;
     // Setup the encrypted relay betwen STDIO and the socket
-    let local_node = RelayNode {
+    let mut local_node = RelayNode {
         readable: std::io::stdin(),
         writeable: std::io::stdout(),
     };
-    relay(local_node, conn, &key)?;
+    relay(&mut local_node, conn, &key, &mut OsRng)?;
 
     Ok(())
 }
