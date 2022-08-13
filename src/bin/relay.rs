@@ -35,11 +35,16 @@ where
     B: WriteFd,
 {
     // Create an array of three fd events
-    let fds = [libc::pollfd {
+    let mut fds = [libc::pollfd {
         fd: 0,
         events: 0,
         revents: 0,
     }; 3];
-
+    // Initialize the node1 & 2 file descriptors
+    fds[0].fd = node1.readable.as_raw_fd();
+    fds[1].fd = node1.writeable.as_raw_fd();
+    fds[2].fd = (*node2).as_raw_fd();
+    // Create a buffer for each node
+    //
     unimplemented!()
 }
