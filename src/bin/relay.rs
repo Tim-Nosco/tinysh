@@ -43,7 +43,7 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 //      - the data
 //      - the authentication tag (16 bytes)
 const INTERNALBUF_MAX_SIZE: usize = 1024;
-#[derive(Clone, Copy)]
+const INTERNALBUF_META: usize = 2 + 12 + 16;
 struct InternalBuf {
     pub buf: [u8; INTERNALBUF_MAX_SIZE],
     pub filled: usize,
@@ -53,29 +53,45 @@ impl InternalBuf {
     // After reading from buf, remove the used data
     fn clear(&mut self, amount: usize) {
         // Move data from self.buf[amount..filled] to self.buf[0..filled-amount]
-        todo!();
+        if amount < self.filled {
+            let mut tmp = [0u8; INTERNALBUF_MAX_SIZE];
+            tmp[0..self.filled - amount].copy_from_slice(&self.buf[amount..self.filled]);
+            self.buf[..].copy_from_slice(&tmp[..]);
+        }
         // Update the remaining data count
-        self.filled.saturating_sub(amount);
+        self.filled = self.filled.saturating_sub(amount);
     }
-    // Use this to ensure a message is complete before decrypting
-    fn msg_complete(&mut self) -> bool {
-        todo!()
+    // Determine how large the next decrypted message would be
+    fn next_decrypt_len(&self) -> Option<usize> {
+        // First, check if there's a full message to decrypt
+        if self.filled >= 2 {
+            let msg_size = u16::from_be_bytes(self.buf[0..2].try_into().ok()?)
+                .saturating_sub(INTERNALBUF_META.try_into().ok()?)
+                .into();
+            if self.filled + 2 <= msg_size {
+                Some(msg_size)
+            } else {
+                None
+            }
+        } else {
+            None
+        }
     }
-    // Return a decrypted message from the interal buffer
-    fn decrypt(&mut self, cipher: Aes256Gcm) -> Result<Vec<u8>> {
+    // Return a decrypted message from the interal buffer (and clear decrypted)
+    fn decrypt(&mut self, cipher: &mut Aes256Gcm) -> Result<Vec<u8>> {
         todo!()
     }
     // Query how much space is left for new data
-    fn remains(&mut self, raw: bool) -> usize {
+    fn remains(&self, raw: bool) -> usize {
         if raw {
             INTERNALBUF_MAX_SIZE.saturating_sub(self.filled)
         } else {
             // account for 2 byte size, 12 byte nonce, and 16 byte auth tag if encrypted
-            INTERNALBUF_MAX_SIZE.saturating_sub(self.filled + 2 + 12 + 16)
+            INTERNALBUF_MAX_SIZE.saturating_sub(self.filled + INTERNALBUF_META)
         }
     }
     // Add data to the buffer, encrypting it first
-    fn extend_encrypted(&mut self, cipher: Aes256Gcm, msg: &[u8]) -> Result<()> {
+    fn extend_encrypted(&mut self, cipher: &mut Aes256Gcm, msg: &[u8]) -> Result<()> {
         todo!()
     }
 }
@@ -120,12 +136,17 @@ where
     fds[0b10].events |= libc::POLLIN;
 
     // Create a buffer for each fds entry
-    let bufs = [InternalBuf::default(); 4];
+    let mut bufs = vec![
+        InternalBuf::default(),
+        InternalBuf::default(),
+        InternalBuf::default(),
+        InternalBuf::default(),
+    ];
 
     // Initialize a cipher for each end of node2
     let mut ciphers = vec![
-        Aes256Gcm::new_from_slice(key),
-        Aes256Gcm::new_from_slice(key),
+        Aes256Gcm::new_from_slice(key)?,
+        Aes256Gcm::new_from_slice(key)?,
     ];
 
     loop {
@@ -133,24 +154,83 @@ where
         if unsafe { libc::poll(fds.as_mut_ptr(), fds.len().try_into()?, -1) } < 0 {
             Err(anyhow!("Error using poll."))?;
         }
+        println!("poll returns!");
         // Go through each event and recv or send as needed
         for (idx, fd) in fds.iter().enumerate() {
             // Lookup the working buffer
-            let mut buf = bufs[idx];
+            let mut buf = &mut bufs[idx];
             // Ready to recv
             if 0 < (fd.revents & libc::POLLIN) {
+                println!("POLLIN on {}", idx);
                 let max_recv = buf.remains(true);
                 let this_node: &mut (dyn Read) = if 0 < (idx & 0b10) { node2 } else { node1 };
-                buf.filled += this_node.read(&mut buf.buf[buf.filled..buf.filled + max_recv])?;
+                let read_amt = this_node.read(&mut buf.buf[buf.filled..buf.filled + max_recv])?;
+                if read_amt == 0 {
+                    // socket shutdown
+                    Err(anyhow!("Node shutdown."))?;
+                }
+                buf.filled += read_amt;
+                println!("filled: {}", buf.filled);
             }
             // Ready to send
             if 0 < (fd.revents & libc::POLLOUT) {
+                println!("POLLOUT on {}", idx);
                 let this_node: &mut (dyn Write) = if 0 < (idx & 0b10) { node2 } else { node1 };
                 buf.clear(this_node.write(&buf.buf[0..buf.filled])?);
             }
         }
-        // TODO: Encrypt / decrypt as needed
-        // TODO: Set POLLIN and POLLOUT
-        unimplemented!()
+
+        // Encrypt / decrypt as needed
+        // node1.writeable  <- D(c) <- node2.readable
+        let src = 0b10;
+        let dst = 0b01;
+        // while there's room to decrypt messages
+        while let Some(decrypted_size) = bufs[src].next_decrypt_len() {
+            println!("decrypting");
+            if decrypted_size > bufs[dst].remains(true) {
+                break;
+            }
+            let msg = bufs[src].decrypt(&mut ciphers[1])?;
+            let filled = bufs[dst].filled;
+            bufs[dst].buf[filled..filled + msg.len()].copy_from_slice(&msg);
+        }
+        // node1.readable   -> E(p) -> node2.writeable
+        let src = 0b00;
+        let dst = 0b11;
+        let max_msg_size = bufs[dst].remains(false);
+        if 0 < bufs[src].filled && max_msg_size > 0 {
+            println!("encrypting");
+            // Fill up the remaining space in dst with a new message
+            // First we must do some trickery to get two mutable pointers in the bufs array
+            let (part1, part2) = bufs.split_at_mut(2);
+            let srcbuf = &mut part1[0];
+            let dstbuf = &mut part2[1];
+            // Next, extract out the message we want to encrypt
+            let msg = &srcbuf.buf[0..max_msg_size];
+            // Encrypt it
+            dstbuf.extend_encrypted(&mut ciphers[0], &msg)?;
+            // Discard the used content
+            srcbuf.clear(msg.len());
+        }
+
+        // Set POLLIN and POLLOUT
+        for idx in 0..fds.len() {
+            // Clear the previous events
+            fds[idx].events = 0;
+            // This is a writeable
+            if 0 < idx & 0b01 {
+                // and there's stuff to write
+                if 0 < bufs[idx].filled {
+                    fds[idx].events |= libc::POLLOUT;
+                }
+            }
+            // Otherwise it's a readable
+            else {
+                // and there's room to read things
+                if 0 < bufs[idx].remains(true) {
+                    fds[idx].events |= libc::POLLIN;
+                }
+            }
+        }
     }
 }
