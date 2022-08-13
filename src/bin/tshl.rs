@@ -1,3 +1,4 @@
+#![feature(trait_alias)]
 mod kex;
 mod relay;
 
@@ -7,8 +8,8 @@ use kex::{play_auth_challenge_local, play_dh_kex_local};
 use p256::SecretKey;
 use rand_core::OsRng;
 use std::fs::{File, OpenOptions};
-use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener};
+use std::io::Write;
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
 use std::sync::Mutex;
@@ -84,21 +85,17 @@ fn keygen(out_file: Option<&PathBuf>, in_file: &Option<PathBuf>) -> Result<Secre
     Ok(priv_key)
 }
 
-fn handle_client<T: Read + Write>(conn: &mut T, secret_l: &SecretKey) -> Result<()> {
+fn handle_client(conn: &mut TcpStream, secret_l: &SecretKey) -> Result<()> {
     // Get the shared key
     let key = play_dh_kex_local(conn, secret_l)?;
     // Respond to the challenge
     play_auth_challenge_local(conn, secret_l)?;
     // Setup the encrypted relay betwen STDIO and the socket
-    // let local_node = RelayNode {
-    //     readable: std::io::stdin(),
-    //     writeable: std::io::stdout(),
-    // };
-    // let remote_node = RelayNode {
-    //     readable: conn,
-    //     writeable: conn,
-    // };
-    // relay(local_node, remote_node, &key)?;
+    let local_node = RelayNode {
+        readable: std::io::stdin(),
+        writeable: std::io::stdout(),
+    };
+    relay(local_node, conn, &key)?;
 
     Ok(())
 }

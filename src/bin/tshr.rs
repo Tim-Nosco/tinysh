@@ -1,4 +1,5 @@
 #![no_main]
+#![feature(trait_alias)]
 
 extern crate libc;
 #[macro_use]
