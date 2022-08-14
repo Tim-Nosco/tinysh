@@ -16,13 +16,11 @@ use auxv::getauxval;
 use kex::{get_local_info, play_auth_challenge_remote, play_dh_kex_remote};
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-use std::ffi::CStr;
 use std::ffi::{c_char, CStr};
 use std::fs::File;
 use std::io::Write;
 use std::net::TcpStream;
 use std::os::unix::io::FromRawFd;
-use std::sync::Mutex;
 use std::sync::Mutex;
 
 #[allow(unused_imports)]
