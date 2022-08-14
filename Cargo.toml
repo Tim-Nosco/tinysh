@@ -4,20 +4,20 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-p256 = { version = "*", features = ["ecdh", "pem"] }
+p256 = { version = "*", features = ["ecdh", "ecdsa", "pem"] }
 rand_chacha = "*"
 rand_core = "*"
 libc = "*"
 anyhow = "*"
 thiserror = "*"
 sha2 = "*"
-aes-gcm = { version = "*", features = ["aes"] }
+aes-gcm = { version = "0.10.1", features = ["aes"] }
 lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.
-# panic = "abort"
+panic = "unwind"
 
 [profile.release]
 opt-level = "z"     # Optimize for size.
@@ -25,3 +25,7 @@ lto = true          # Enable Link Time Optimization
 codegen-units = 1   # Reduce number of codegen units to increase optimizations.
 panic = "abort"     # Abort on panic
 strip = true        # Automatically strip symbols from the binary.
+
+[profile.bloat]
+inherits = "release"
+strip = false
