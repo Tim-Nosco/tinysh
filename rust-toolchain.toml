@@ -1,5 +1,13 @@
 [toolchain]
 channel = "nightly"
 components = [ "rust-src" ]
-targets = [ "x86_64-unknown-linux-gnu", "mipsel-unknown-linux-musl" ]
+targets = [ "x86_64-unknown-linux-gnu",
+            "aarch64-unknown-linux-musl",
+            "arm-unknown-linux-musleabi",
+            "i686-unknown-linux-musl",
+            "mips-unknown-linux-musl",
+            "mips64-unknown-linux-muslabi64",
+            "mips64el-unknown-linux-muslabi64",
+            "mipsel-unknown-linux-musl",
+            "x86_64-unknown-linux-musl" ]
 profile = "minimal"
