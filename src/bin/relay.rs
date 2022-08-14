@@ -1,8 +1,8 @@
-#![allow(unused_variables, dead_code)]
+#![allow(dead_code)]
 extern crate libc;
 
 use aes_gcm::{
-    aead::{Aead, AeadCore, KeyInit},
+    aead::{Aead, KeyInit},
     Aes256Gcm, Nonce,
 };
 use anyhow::{anyhow, Result};
@@ -96,7 +96,9 @@ impl InternalBuf {
             INTERNALBUF_MAX_SIZE.saturating_sub(self.filled)
         } else {
             // account for 2 byte size, 12 byte nonce, and 16 byte auth tag if encrypted
-            INTERNALBUF_MAX_SIZE.saturating_sub(self.filled + INTERNALBUF_META)
+            let pt_no_blocks = INTERNALBUF_MAX_SIZE.saturating_sub(self.filled + INTERNALBUF_META);
+            // account for block size
+            pt_no_blocks.saturating_sub(pt_no_blocks % 16)
         }
     }
     // Add data to the buffer, encrypting it first
@@ -197,12 +199,13 @@ where
                 let max_recv = buf.remains(true);
                 let this_node: &mut (dyn Read) = if 0 < (idx & 0b10) { node2 } else { node1 };
                 let read_amt = this_node.read(&mut buf.buf[buf.filled..buf.filled + max_recv])?;
+                // println!("- read: {} bytes", read_amt);
                 if read_amt == 0 {
                     // socket shutdown
-                    Err(anyhow!("Node shutdown."))?;
+                    Err(anyhow!("Node shutdown"))?;
                 }
                 buf.filled += read_amt;
-                // println!("filled: {}", buf.filled);
+                // println!("- filled {}: {}", idx, buf.filled);
             }
             // Ready to send
             if 0 < (fd.revents & libc::POLLOUT) {
@@ -236,12 +239,10 @@ where
             let dst = 0b11;
             // calculate how much we can encrypt
             let mut max_msg_size = bufs[dst].remains(false);
-            // account for block size
-            max_msg_size -= max_msg_size % 16;
             // ensure we don't pull more than we have
             max_msg_size = max_msg_size.min(bufs[src].filled);
             if max_msg_size > 0 {
-                // println!("encrypting");
+                // println!("encrypting {} bytes", max_msg_size);
                 // Fill up the remaining space in dst with a new message
                 // First we must do some trickery to get two mutable pointers in the bufs array
                 let (part1, part2) = bufs.split_at_mut(2);
@@ -264,6 +265,7 @@ where
             if 0 < idx & 0b01 {
                 // and there's stuff to write
                 if 0 < bufs[idx].filled {
+                    // println!("setting POLLOUT on {}", idx);
                     fds[idx].events |= libc::POLLOUT;
                 }
             }
@@ -271,6 +273,7 @@ where
             else {
                 // and there's room to read things
                 if 0 < bufs[idx].remains(true) {
+                    // println!("setting POLLIN on {}", idx);
                     fds[idx].events |= libc::POLLIN;
                 }
             }
