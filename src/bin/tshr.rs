@@ -19,7 +19,7 @@ use rand_core::SeedableRng;
 use std::ffi::{c_char, CStr};
 use std::fs::File;
 use std::io::Write;
-use std::net::TcpStream;
+use std::net::{SocketAddr, TcpStream};
 use std::os::unix::io::FromRawFd;
 use std::sync::Mutex;
 
@@ -38,9 +38,15 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
         STDOUT
             .lock()
             .unwrap()
-            .write(format!("deref rand bytes at: {:#016x}\n", rand_ptr as usize).as_bytes())
+            .write(format!("deref rand bytes at: {:#016x}=", rand_ptr as usize).as_bytes())
             .unwrap();
-        Some(unsafe { *(rand_ptr) })
+        let result = unsafe { *(rand_ptr) };
+        STDOUT
+            .lock()
+            .unwrap()
+            .write(format!("{:#016x}\n", result).as_bytes())
+            .unwrap();
+        Some(result)
     } else {
         // getauxval(AT_RANDOM) is not available, use /dev/urandom
         None
@@ -68,7 +74,14 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     STDOUT
         .lock()
         .unwrap()
-        .write(format!("Found local's key:\n{:#}\n", pub_l.to_string()).as_bytes())
+        .write(
+            format!(
+                "Found local's key:\n{:#}\nAnd address: {:#}\n",
+                pub_l.to_string(),
+                ipaddr_l,
+            )
+            .as_bytes(),
+        )
         .unwrap();
 
     // Seed the RNG
@@ -79,7 +92,8 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // TODO: Register SIGALRM
 
     // Open the socket to remote
-    let mut remote = TcpStream::connect(format!("{}:2000", ipaddr_l)).expect("Unable to connect.");
+    let addr = SocketAddr::from((ipaddr_l, 2000));
+    let mut remote = TcpStream::connect(addr).expect("Unable to connect.");
 
     // Get the shared AES key
     let key = play_dh_kex_remote(&mut remote, &pub_l, seed1).expect("Failed KEX");
