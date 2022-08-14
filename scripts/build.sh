@@ -8,7 +8,9 @@ fi
 cargo build \
     --target mipsel-unknown-linux-musl \
     --bin tshr \
-    --release
+    --release \
+    -Zbuild-std=std,core,alloc,panic_abort \
+    -Zbuild-std-features=panic_immediate_abort
 
 cargo build \
     --target x86_64-unknown-linux-gnu \
