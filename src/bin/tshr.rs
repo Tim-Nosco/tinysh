@@ -102,14 +102,12 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
 
     // TODO: mkfifo's
     {
-        let r = STDIN.lock().unwrap();
-        let w = STDOUT.lock().unwrap();
         let mut node1 = RelayNode {
             readable: std::io::stdin(),
             writeable: std::io::stdout(),
         };
         // Start up the relay
-        relay(&mut node1, &mut remote, &key, &mut rng);
+        relay(&mut node1, &mut remote, &key, &mut rng).expect("Finished relay");
     }
     return 0;
 }
