@@ -65,7 +65,9 @@ impl InternalBuf {
     fn next_decrypt_len(&self) -> Option<usize> {
         // First, check if there's a full message to decrypt
         if self.filled >= 2 {
-            let enc_msg_size = u16::from_be_bytes(self.buf[0..2].try_into().ok()?).into();
+            let enc_msg_size = usize::from(u16::from_be_bytes(self.buf[0..2].try_into().ok()?))
+                // This min ensures that a manipulated size field is still bounded
+                .min(INTERNALBUF_MAX_SIZE);
             if self.filled >= enc_msg_size {
                 // Now calculate how big the decrypt would be
                 Some(enc_msg_size.saturating_sub(INTERNALBUF_META))
@@ -240,7 +242,7 @@ where
             // calculate how much we can encrypt
             let mut max_msg_size = bufs[dst].remains(false);
             // ensure we don't pull more than we have
-            max_msg_size = max_msg_size.min(bufs[src].filled);
+            max_msg_size = max_msg_size.min(bufs[src].filled - (bufs[src].filled % 16));
             if max_msg_size > 0 {
                 // println!("encrypting {} bytes", max_msg_size);
                 // Fill up the remaining space in dst with a new message
