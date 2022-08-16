@@ -1,0 +1,5 @@
+wrap_comments = true
+comment_width = 70
+max_width = 70
+format_strings = true
+hard_tabs = true
