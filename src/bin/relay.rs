@@ -179,6 +179,33 @@ impl InternalBuf {
 		self.filled += ct.len();
 		Ok(())
 	}
+	// Take data from self, encrypt it, and store it in another buffer
+	fn encrypt_into<R>(
+		&mut self,
+		dst: &mut InternalBuf,
+		cipher: &mut Aes256Gcm,
+		rng: &mut R,
+	) -> Result<()>
+	where
+		R: RngCore + CryptoRng,
+	{
+		// calculate how much we can encrypt
+		let mut max_msg_size = dst.remains(false);
+		// ensure we don't pull more than we have
+		max_msg_size = max_msg_size.min(self.filled);
+		if max_msg_size > 0 {
+			debug!("encrypting {} bytes", max_msg_size);
+			// Fill up the remaining space in dst with a new
+			// message
+			// Next, extract out the message we want to encrypt
+			let msg = &self.buf[0..max_msg_size];
+			// Encrypt it
+			dst.extend_encrypted(cipher, &msg, rng)?;
+			// Discard the used content
+			self.clear(msg.len());
+		}
+		Ok(())
+	}
 }
 
 impl Default for InternalBuf {
@@ -286,41 +313,26 @@ where
 		}
 
 		// Encrypt / decrypt as needed
-		// node0.writeable  <- D(c) <- node1.readable
-		let src = 0b10;
-		let dst = 0b01;
 		// trickery to get two mutable pointers into bufs
 		let (part0, part1) = bufs.split_at_mut(2);
-		part1[src & 1].decrypt_into(
-			&mut part0[dst & 1],
-			&mut ciphers[src >> 1],
-		)?;
+		// node0.writeable  <- D(c) <- node1.readable
+		{
+			let src = 0b10;
+			let dst = 0b01;
+			part1[src & 1].decrypt_into(
+				&mut part0[dst & 1],
+				&mut ciphers[src >> 1],
+			)?;
+		}
 		// node0.readable   -> E(p) -> node1.writeable
 		{
 			let src = 0b00;
 			let dst = 0b11;
-			// calculate how much we can encrypt
-			let mut max_msg_size = bufs[dst].remains(false);
-			// ensure we don't pull more than we have
-			max_msg_size = max_msg_size.min(bufs[src].filled);
-			if max_msg_size > 0 {
-				debug!("encrypting {} bytes", max_msg_size);
-				// Fill up the remaining space in dst with a new
-				// message
-				let (part1, part2) = bufs.split_at_mut(2);
-				let srcbuf = &mut part1[0];
-				let dstbuf = &mut part2[1];
-				// Next, extract out the message we want to encrypt
-				let msg = &srcbuf.buf[0..max_msg_size];
-				// Encrypt it
-				dstbuf.extend_encrypted(
-					&mut ciphers[src >> 1],
-					&msg,
-					rng,
-				)?;
-				// Discard the used content
-				srcbuf.clear(msg.len());
-			}
+			part0[src & 1].encrypt_into(
+				&mut part1[dst & 1],
+				&mut ciphers[src >> 1],
+				rng,
+			)?;
 		}
 
 		// Set POLLIN and POLLOUT
