@@ -11,7 +11,6 @@ use std::io::{Error, Read, Write};
 use std::net::TcpStream;
 use std::os::unix::io::AsRawFd;
 
-pub trait ReadWrite = Read + Write;
 pub trait ReadFd = Read + AsRawFd;
 pub trait WriteFd = Write + AsRawFd;
 // Use this struct to act like a socket with read and write calls
@@ -154,8 +153,8 @@ impl Default for InternalBuf {
 
 // Encrypted relay between two nodes
 pub fn relay<A, B, R>(
-    node1: &mut RelayNode<A, B>,
-    node2: &mut TcpStream,
+    node0: &mut RelayNode<A, B>,
+    node1: &mut TcpStream,
     key: &[u8; 32],
     rng: &mut R,
 ) -> Result<()>
@@ -172,11 +171,11 @@ where
         revents: 0,
     }; 4];
 
-    // Initialize the node1 & 2 file descriptors
-    fds[0b00].fd = node1.readable.as_raw_fd(); // Read
-    fds[0b01].fd = node1.writeable.as_raw_fd(); // Write
-    fds[0b10].fd = (*node2).as_raw_fd(); // Read
-    fds[0b10].fd = (*node2).as_raw_fd(); // Write
+    // Initialize the node0 & 2 file descriptors
+    fds[0b00].fd = node0.readable.as_raw_fd(); // Read
+    fds[0b01].fd = node0.writeable.as_raw_fd(); // Write
+    fds[0b10].fd = (*node1).as_raw_fd(); // Read
+    fds[0b10].fd = (*node1).as_raw_fd(); // Write
 
     // Set initial events
     fds[0b00].events |= libc::POLLIN;
@@ -190,7 +189,7 @@ where
         InternalBuf::default(),
     ];
 
-    // Initialize a cipher for each end of node2
+    // Initialize a cipher for each end of node1
     let mut ciphers = vec![
         Aes256Gcm::new_from_slice(key)?,
         Aes256Gcm::new_from_slice(key)?,
@@ -210,7 +209,7 @@ where
             if 0 < (fd.revents & libc::POLLIN) {
                 // println!("POLLIN on {}", idx);
                 let max_recv = buf.remains(true);
-                let this_node: &mut (dyn Read) = if 0 < (idx & 0b10) { node2 } else { node1 };
+                let this_node: &mut (dyn Read) = if 0 < (idx & 0b10) { node1 } else { node0 };
                 let read_amt = this_node.read(&mut buf.buf[buf.filled..buf.filled + max_recv])?;
                 // println!("- read: {} bytes", read_amt);
                 if read_amt == 0 {
@@ -223,14 +222,14 @@ where
             // Ready to send
             if 0 < (fd.revents & libc::POLLOUT) {
                 // println!("POLLOUT on {}", idx);
-                let this_node: &mut (dyn Write) = if 0 < (idx & 0b10) { node2 } else { node1 };
+                let this_node: &mut (dyn Write) = if 0 < (idx & 0b10) { node1 } else { node0 };
                 buf.clear(this_node.write(&buf.buf[0..buf.filled])?);
                 this_node.flush()?;
             }
         }
 
         // Encrypt / decrypt as needed
-        // node1.writeable  <- D(c) <- node2.readable
+        // node0.writeable  <- D(c) <- node1.readable
         {
             let src = 0b10;
             let dst = 0b01;
@@ -246,7 +245,7 @@ where
                 bufs[dst].filled += msg.len();
             }
         }
-        // node1.readable   -> E(p) -> node2.writeable
+        // node0.readable   -> E(p) -> node1.writeable
         {
             let src = 0b00;
             let dst = 0b11;
