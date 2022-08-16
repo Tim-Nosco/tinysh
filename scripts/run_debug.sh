@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # stop on failure
-set -e
+set -em
 
 # kill any running listeners
 for x in $(netstat -tulpn | grep -oP '(\d+)(?=/target)'); do
@@ -21,6 +21,6 @@ cargo run --bin tshl $ARCH -- listen -k key.priv -a "127.0.0.1:2000" &
 sleep 1
 
 # start the remote client
-cargo run --bin tshr $ARCH -- "127.0.0.1" ${KEY}
+cargo run --bin tshr $ARCH -- "127.0.0.1" ${KEY} &
 
-wait
+fg %1
