@@ -14,9 +14,6 @@ use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-#[allow(unused_imports)]
-use crate::STDOUT;
-
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
     let rng = if let Some(imd) = seed {
         // use the seed
@@ -76,22 +73,14 @@ pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     // send the challenge
     let mut challenge = [0u8; 128];
     rng.try_fill_bytes(&mut challenge)?;
-    STDOUT
-        .lock()
-        .unwrap()
-        .write(format!("Created challenge:\n{:02X?}\n", challenge).as_bytes())
-        .unwrap();
+    println!("Created challenge:\n{:02X?}\n", challenge);
     sock.write(&challenge)?;
 
     // recv the signed challenge
     let mut signature_raw = [0u8; 64];
     sock.read_exact(&mut signature_raw)?;
     let signature = Signature::from_bytes(&signature_raw)?;
-    STDOUT
-        .lock()
-        .unwrap()
-        .write(format!("Recv'd local's signature:\n{:#}\n", signature).as_bytes())
-        .unwrap();
+    println!("Recv'd local's signature:\n{:#}\n", signature);
 
     // verify
     VerifyingKey::from(pub_l).verify(&challenge, &signature)?;

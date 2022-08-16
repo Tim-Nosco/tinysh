@@ -7,23 +7,13 @@ use clap::{Parser, Subcommand};
 use kex::{play_auth_challenge_local, play_dh_kex_local};
 use p256::SecretKey;
 use rand_core::OsRng;
-use std::fs::{File, OpenOptions};
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::unix::io::FromRawFd;
 use std::path::PathBuf;
-use std::sync::Mutex;
 
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
-
-#[macro_use]
-extern crate lazy_static;
-
-lazy_static! {
-    static ref STDIN: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(0) });
-    static ref STDOUT: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(1) });
-}
 
 #[derive(Parser)]
 #[clap(name = "TinySHell")]
