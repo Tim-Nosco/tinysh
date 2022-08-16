@@ -2,8 +2,6 @@
 #![feature(trait_alias)]
 
 extern crate libc;
-#[macro_use]
-extern crate lazy_static;
 mod auxv;
 mod kex;
 mod relay;
@@ -21,31 +19,18 @@ use std::fs::File;
 use std::io::Write;
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::io::FromRawFd;
-use std::sync::Mutex;
 
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
 
-// Define some functions to work around the uclibc tools
-lazy_static! {
-    static ref STDIN: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(0) });
-    static ref STDOUT: Mutex<File> = Mutex::new(unsafe { File::from_raw_fd(1) });
-}
+const LOCAL_PORT: u16 = 2000;
 
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
     if 0 != rand_ptr as usize {
         // Assuming everything worked out correctly, this dereference should be fine
-        STDOUT
-            .lock()
-            .unwrap()
-            .write(format!("deref rand bytes at: {:#016x}=", rand_ptr as usize).as_bytes())
-            .unwrap();
+        println!("deref rand bytes at: {:#016x}=", rand_ptr as usize);
         let result = unsafe { *(rand_ptr) };
-        STDOUT
-            .lock()
-            .unwrap()
-            .write(format!("{:#016x}\n", result).as_bytes())
-            .unwrap();
+        println!("{:#016x}\n", result);
         Some(result)
     } else {
         // getauxval(AT_RANDOM) is not available, use /dev/urandom
@@ -71,18 +56,11 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // Parse the IP addr and public key from argv
     let (ipaddr_l, pub_l) =
         get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
-    STDOUT
-        .lock()
-        .unwrap()
-        .write(
-            format!(
-                "Found local's key:\n{:#}\nAnd address: {:#}\n",
-                pub_l.to_string(),
-                ipaddr_l,
-            )
-            .as_bytes(),
-        )
-        .unwrap();
+    println!(
+        "Found local's key:\n{:#}\nAnd address: {:#}\n",
+        pub_l.to_string(),
+        ipaddr_l,
+    );
 
     // Seed the RNG
     // Prefer the auxiliary vector's random data entry for seeding
@@ -92,7 +70,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // TODO: Register SIGALRM
 
     // Open the socket to remote
-    let addr = SocketAddr::from((ipaddr_l, 2000));
+    let addr = SocketAddr::from((ipaddr_l, LOCAL_PORT));
     let mut remote = TcpStream::connect(addr).expect("Unable to connect.");
 
     // Get the shared AES key

@@ -42,8 +42,12 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 //      - the nonce (12 bytes)
 //      - the data
 //      - the authentication tag (16 bytes)
+const MSG_SIZE_FIELD: usize = 2;
+const MSG_NONCE_FIELD: usize = 12;
+const MSG_AUTH_FIELD: usize = 16;
+const MSG_BLOCK_SIZE: usize = 16;
 const INTERNALBUF_MAX_SIZE: usize = 1024;
-const INTERNALBUF_META: usize = 2 + 12 + 16;
+const INTERNALBUF_META: usize = MSG_SIZE_FIELD + MSG_NONCE_FIELD + MSG_AUTH_FIELD;
 struct InternalBuf {
     pub buf: [u8; INTERNALBUF_MAX_SIZE],
     pub filled: usize,
@@ -64,10 +68,12 @@ impl InternalBuf {
     // Determine how large the next decrypted message would be
     fn next_decrypt_len(&self) -> Option<usize> {
         // First, check if there's a full message to decrypt
-        if self.filled >= 2 {
-            let enc_msg_size = usize::from(u16::from_be_bytes(self.buf[0..2].try_into().ok()?))
-                // This min ensures that a manipulated size field is still bounded
-                .min(INTERNALBUF_MAX_SIZE);
+        if self.filled >= MSG_SIZE_FIELD {
+            let enc_msg_size = usize::from(u16::from_be_bytes(
+                self.buf[0..MSG_SIZE_FIELD].try_into().ok()?,
+            ))
+            // This min ensures that a manipulated size field is still bounded
+            .min(INTERNALBUF_MAX_SIZE);
             if self.filled >= enc_msg_size {
                 // Now calculate how big the decrypt would be
                 Some(enc_msg_size.saturating_sub(INTERNALBUF_META))
@@ -82,9 +88,13 @@ impl InternalBuf {
     fn decrypt(&mut self, cipher: &mut Aes256Gcm) -> Result<Vec<u8>> {
         // Check that there's a full message
         if let Some(dec_msg_size) = self.next_decrypt_len() {
-            let nonce = Nonce::from_slice(&self.buf[2..2 + 12]);
+            let nonce =
+                Nonce::from_slice(&self.buf[MSG_SIZE_FIELD..MSG_SIZE_FIELD + MSG_NONCE_FIELD]);
             let pt = cipher
-                .decrypt(nonce, &self.buf[2 + 12..INTERNALBUF_META + dec_msg_size])
+                .decrypt(
+                    nonce,
+                    &self.buf[MSG_SIZE_FIELD + MSG_NONCE_FIELD..INTERNALBUF_META + dec_msg_size],
+                )
                 .or(Err(anyhow!("Unable to decrypt")));
             self.clear(INTERNALBUF_META + dec_msg_size);
             pt
@@ -100,7 +110,7 @@ impl InternalBuf {
             // account for 2 byte size, 12 byte nonce, and 16 byte auth tag if encrypted
             let pt_no_blocks = INTERNALBUF_MAX_SIZE.saturating_sub(self.filled + INTERNALBUF_META);
             // account for block size
-            pt_no_blocks.saturating_sub(pt_no_blocks % 16)
+            pt_no_blocks.saturating_sub(pt_no_blocks % MSG_BLOCK_SIZE)
         }
     }
     // Add data to the buffer, encrypting it first
@@ -109,7 +119,7 @@ impl InternalBuf {
         R: RngCore,
     {
         // Make a new nonce
-        let mut nonce_raw = [0u8; 12];
+        let mut nonce_raw = [0u8; MSG_NONCE_FIELD];
         rng.try_fill_bytes(&mut nonce_raw)?;
         let nonce = Nonce::from_slice(&nonce_raw);
         // Encrypt the message
@@ -119,9 +129,10 @@ impl InternalBuf {
         // Build the encrypted message onto self.buf:
         //  |--size--|--nonce--|--ciphertext--|
         //  size:
-        let total_size: u16 = (2 + nonce.len() + ct.len()).try_into()?;
-        self.buf[self.filled..self.filled + 2].copy_from_slice(&total_size.to_be_bytes());
-        self.filled += 2;
+        let total_size: u16 = (MSG_SIZE_FIELD + nonce.len() + ct.len()).try_into()?;
+        self.buf[self.filled..self.filled + MSG_SIZE_FIELD]
+            .copy_from_slice(&total_size.to_be_bytes());
+        self.filled += MSG_SIZE_FIELD;
         //  nonce:
         self.buf[self.filled..self.filled + nonce.len()].copy_from_slice(&nonce);
         self.filled += nonce.len();
