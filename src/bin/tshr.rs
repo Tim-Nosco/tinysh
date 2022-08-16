@@ -16,8 +16,6 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use std::ffi::{c_char, CStr};
 use std::net::{SocketAddr, TcpStream};
-use std::os::unix::io::AsRawFd;
-use std::os::unix::process::CommandExt;
 use std::process::Command;
 
 #[allow(unused_imports)]
