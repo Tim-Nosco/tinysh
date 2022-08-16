@@ -14,6 +14,7 @@ sha2 = "*"
 aes-gcm = { version = "0.10.1", features = ["aes"] }
 lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
+os_pipe = "*"
 
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.

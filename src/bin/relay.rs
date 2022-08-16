@@ -253,7 +253,7 @@ where
             // calculate how much we can encrypt
             let mut max_msg_size = bufs[dst].remains(false);
             // ensure we don't pull more than we have
-            max_msg_size = max_msg_size.min(bufs[src].filled - (bufs[src].filled % 16));
+            max_msg_size = max_msg_size.min(bufs[src].filled);
             if max_msg_size > 0 {
                 // println!("encrypting {} bytes", max_msg_size);
                 // Fill up the remaining space in dst with a new message
