@@ -315,8 +315,8 @@ where
 		// Encrypt / decrypt as needed
 		// trickery to get two mutable pointers into bufs
 		let (part0, part1) = bufs.split_at_mut(2);
-		// node0.writeable  <- D(c) <- node1.readable
 		{
+			// node0.writeable  <- D(c) <- node1.readable
 			let src = 0b10;
 			let dst = 0b01;
 			part1[src & 1].decrypt_into(
@@ -324,8 +324,8 @@ where
 				&mut ciphers[src >> 1],
 			)?;
 		}
-		// node0.readable   -> E(p) -> node1.writeable
 		{
+			// node0.readable   -> E(p) -> node1.writeable
 			let src = 0b00;
 			let dst = 0b11;
 			part0[src & 1].encrypt_into(
