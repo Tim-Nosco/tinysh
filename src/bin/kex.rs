@@ -14,6 +14,8 @@ use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::str::FromStr;
 
+use super::debug;
+
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
     let rng = if let Some(imd) = seed {
         // use the seed
@@ -53,7 +55,7 @@ pub fn play_dh_kex_local<T: Read + Write>(sock: &mut T, secret_l: &SecretKey) ->
     let mut other_pub = [0u8; 512];
     sock.read_exact(&mut other_pub)?;
     let pub_r = PublicKey::from_str(std::str::from_utf8(&other_pub)?.trim())?;
-    println!("Got remote's pub key:\n{:#}", pub_r.to_string());
+    debug!("Got remote's pub key:\n{:#}", pub_r.to_string());
     // Calculate the shared secret
     let secret_hkdf =
         diffie_hellman(secret_l.to_nonzero_scalar(), pub_r.as_affine()).extract::<Sha256>(None);
@@ -73,14 +75,14 @@ pub fn play_auth_challenge_remote<T: RngCore + CryptoRng, A: Write + Read>(
     // send the challenge
     let mut challenge = [0u8; 128];
     rng.try_fill_bytes(&mut challenge)?;
-    println!("Created challenge:\n{:02X?}\n", challenge);
+    debug!("Created challenge:\n{:02X?}\n", challenge);
     sock.write(&challenge)?;
 
     // recv the signed challenge
     let mut signature_raw = [0u8; 64];
     sock.read_exact(&mut signature_raw)?;
     let signature = Signature::from_bytes(&signature_raw)?;
-    println!("Recv'd local's signature:\n{:#}\n", signature);
+    debug!("Recv'd local's signature:\n{:#}\n", signature);
 
     // verify
     VerifyingKey::from(pub_l).verify(&challenge, &signature)?;
@@ -95,17 +97,17 @@ pub fn play_auth_challenge_local<A: Write + Read>(
     // recv the challenge
     let mut challenge = [0u8; 128];
     sock.read_exact(&mut challenge)?;
-    println!("Recv'd remote's challenge:\n{:02X?}", challenge);
+    debug!("Recv'd remote's challenge:\n{:02X?}", challenge);
 
     // sign the challenge
     let signed_chal = SigningKey::from(secret_l).sign(&challenge);
     let signed_chal_b = signed_chal.as_bytes();
-    println!(
+    debug!(
         "Generated signature of {} bytes:\n{:#}",
         signed_chal_b.len(),
         signed_chal
     );
-    // println!(
+    // debug!(
     //     "{:?}",
     //     VerifyingKey::from(secret_l.public_key()).verify(&challenge, &signed_chal)
     // );

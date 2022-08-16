@@ -14,21 +14,36 @@ use auxv::getauxval;
 use kex::{get_local_info, play_auth_challenge_remote, play_dh_kex_remote};
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
+use relay::{relay, RelayNode};
 use std::ffi::{c_char, CStr};
 use std::net::{SocketAddr, TcpStream};
 use std::process::Command;
 
-#[allow(unused_imports)]
-use relay::{relay, RelayNode};
+// A little trick to make it so the debug printing doesn't output in the release
+macro_rules! debug {
+    ($($x:tt)*) => {
+        {
+            #[cfg(debug_assertions)]
+            {
+                println!($($x)*)
+            }
+            #[cfg(not(debug_assertions))]
+            {
+                ($($x)*)
+            }
+        }
+    }
+}
+pub(crate) use debug;
 
 const LOCAL_PORT: u16 = 2000;
 
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
     if 0 != rand_ptr as usize {
         // Assuming everything worked out correctly, this dereference should be fine
-        println!("deref rand bytes at: {:#016x}", rand_ptr as usize);
+        debug!("deref rand bytes at: {:#016x}", rand_ptr as usize);
         let result = unsafe { *(rand_ptr) };
-        println!("= {:#016x}", result);
+        debug!("= {:#016x}", result);
         Some(result)
     } else {
         // getauxval(AT_RANDOM) is not available, use /dev/urandom
@@ -54,7 +69,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     // Parse the IP addr and public key from argv
     let (ipaddr_l, pub_l) =
         get_local_info(argv_vec).expect("Failed to parse remote pub key and ip addr");
-    println!(
+    debug!(
         "Found local's key:\n{:#}\nAnd address: {:#}",
         pub_l.to_string(),
         ipaddr_l,
@@ -78,7 +93,7 @@ pub fn main(argc: i32, argv: *const *const u8, envp: *const *const u8) -> i8 {
     let mut rng = if let Some(seed2) = get_rand_seed(unsafe { rand_ptr.add(1) }) {
         ChaCha20Rng::seed_from_u64(seed2)
     } else {
-        println!("Unable to use seeds, using /dev/urandom");
+        debug!("Unable to use seeds, using /dev/urandom");
         ChaCha20Rng::from_entropy()
     };
 
