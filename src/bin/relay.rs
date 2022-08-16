@@ -103,6 +103,21 @@ impl InternalBuf {
             Err(anyhow!("Not enough data to decrypt completely"))
         }
     }
+    // Take existing encrypted messages from self and write them into another buffer
+    fn decrypt_into(&mut self, dst: &mut InternalBuf, cipher: &mut Aes256Gcm) -> Result<()> {
+        // while there's room to decrypt messages
+        while let Some(decrypted_size) = self.next_decrypt_len() {
+            debug!("decrypting");
+            if decrypted_size > dst.remains(true) {
+                break;
+            }
+            let msg = self.decrypt(cipher)?;
+            let filled = dst.filled;
+            dst.buf[filled..filled + msg.len()].copy_from_slice(&msg);
+            dst.filled += msg.len();
+        }
+        Ok(())
+    }
     // Query how much space is left for new data
     fn remains(&self, raw: bool) -> usize {
         if raw {
@@ -154,15 +169,20 @@ impl Default for InternalBuf {
 }
 
 // Encrypted relay between two nodes
-pub fn relay<A, B, R>(
+pub fn relay<A, B, C, R>(
+    // This can be stdin/stdout, pipes, etc.
     node0: &mut RelayNode<A, B>,
-    node1: &mut TcpStream,
+    // This should be the full-duplex remote connection
+    node1: &mut C,
+    // The shared key between ends of node1. Used for symmetric encryption.
     key: &[u8; 32],
+    // This rng is used to generate 12-byte nonces for each message
     rng: &mut R,
 ) -> Result<()>
 where
     A: ReadFd,
     B: WriteFd,
+    C: ReadFd + WriteFd,
     R: CryptoRng + RngCore,
 {
     // Create an array for fd events
@@ -173,7 +193,9 @@ where
         revents: 0,
     }; 4];
 
-    // Initialize the node0 & 2 file descriptors
+    // Initialize the node0 & 1 file descriptors for use in poll.
+    //  Both nodes are full duplex, so they each get two entries
+    //  the most significant index bit represents the node number
     fds[0b00].fd = node0.readable.as_raw_fd(); // Read
     fds[0b01].fd = node0.writeable.as_raw_fd(); // Write
     fds[0b10].fd = (*node1).as_raw_fd(); // Read
@@ -191,7 +213,7 @@ where
         InternalBuf::default(),
     ];
 
-    // Initialize a cipher for each end of node1
+    // Initialize a cipher for recv and sends on node1
     let mut ciphers = vec![
         Aes256Gcm::new_from_slice(key)?,
         Aes256Gcm::new_from_slice(key)?,
@@ -236,17 +258,9 @@ where
         {
             let src = 0b10;
             let dst = 0b01;
-            // while there's room to decrypt messages
-            while let Some(decrypted_size) = bufs[src].next_decrypt_len() {
-                // println!("decrypting");
-                if decrypted_size > bufs[dst].remains(true) {
-                    break;
-                }
-                let msg = bufs[src].decrypt(&mut ciphers[src >> 1])?;
-                let filled = bufs[dst].filled;
-                bufs[dst].buf[filled..filled + msg.len()].copy_from_slice(&msg);
-                bufs[dst].filled += msg.len();
-            }
+            // trickery to get two mutable pointers into bufs
+            let (part0, part1) = bufs.split_at_mut(2);
+            part1[src | 1].decrypt_into(&mut part0[dst | 1], &mut ciphers[src >> 1])?;
         }
         // node0.readable   -> E(p) -> node1.writeable
         {
