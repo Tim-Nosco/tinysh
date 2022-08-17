@@ -1,6 +1,7 @@
 #![feature(trait_alias)]
 mod kex;
 mod relay;
+pub mod util;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -14,24 +15,6 @@ use std::path::PathBuf;
 
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
-
-// A little trick to make it so the debug printing doesn't output in
-// the release
-macro_rules! debug {
-    ($($x:tt)*) => {
-        {
-            #[cfg(debug_assertions)]
-            {
-                println!($($x)*)
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                ($($x)*)
-            }
-        }
-    }
-}
-pub(crate) use debug;
 
 #[derive(Parser)]
 #[clap(name = "TinySHell")]

@@ -10,10 +10,8 @@ use rand_core::{CryptoRng, RngCore};
 use std::io::{Error, Read, Write};
 use std::os::unix::io::AsRawFd;
 
-use super::debug;
+use crate::util::debug;
 
-pub trait ReadFd = Read + AsRawFd;
-pub trait WriteFd = Write + AsRawFd;
 // Use this struct to act like a socket with read and write calls
 pub struct RelayNode<R, W> {
 	pub readable: R,
@@ -230,9 +228,9 @@ pub fn relay<A, B, C, R>(
 	rng: &mut R,
 ) -> Result<()>
 where
-	A: ReadFd,
-	B: WriteFd,
-	C: ReadFd + WriteFd,
+	A: Read + AsRawFd,
+	B: Write + AsRawFd,
+	C: Read + AsRawFd + Write,
 	R: CryptoRng + RngCore,
 {
 	// Create an array for fd events
@@ -356,5 +354,15 @@ where
 				}
 			}
 		}
+	}
+}
+
+#[cfg(test)]
+mod tests {
+	use super::*;
+
+	#[test]
+	fn new_internal_buf() {
+		InternalBuf::default();
 	}
 }

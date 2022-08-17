@@ -14,7 +14,7 @@ use std::io::{Read, Write};
 use std::net::IpAddr;
 use std::str::FromStr;
 
-use super::debug;
+use crate::util::debug;
 
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
 	let rng = if let Some(imd) = seed {

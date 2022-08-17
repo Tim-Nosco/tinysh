@@ -5,6 +5,7 @@ extern crate libc;
 mod auxv;
 mod kex;
 mod relay;
+pub mod util;
 
 #[allow(unused_imports)]
 use aes_gcm::{Aes256Gcm, Key, Nonce};
@@ -20,24 +21,7 @@ use relay::{relay, RelayNode};
 use std::ffi::{c_char, CStr};
 use std::net::{SocketAddr, TcpStream};
 use std::process::Command;
-
-// A little trick to make it so the debug printing doesn't output in
-// the release
-macro_rules! debug {
-    ($($x:tt)*) => {
-        {
-            #[cfg(debug_assertions)]
-            {
-                println!($($x)*)
-            }
-            #[cfg(not(debug_assertions))]
-            {
-                ($($x)*)
-            }
-        }
-    }
-}
-pub(crate) use debug;
+use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
 

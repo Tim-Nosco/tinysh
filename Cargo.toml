@@ -30,3 +30,11 @@ strip = true        # Automatically strip symbols from the binary.
 [profile.bloat]
 inherits = "release"
 strip = false
+
+[[bin]]
+name = "tshl"
+path = "src/tshl.rs"
+
+[[bin]]
+name = "tshr"
+path = "src/tshr.rs"
