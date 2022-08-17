@@ -1,4 +1,4 @@
-#![no_main]
+#![cfg_attr(not(test), no_main)]
 #![feature(trait_alias)]
 
 extern crate libc;
@@ -39,7 +39,7 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	}
 }
 
-#[no_mangle]
+#[cfg_attr(not(test), no_mangle)]
 pub fn main(
 	argc: i32,
 	argv: *const *const u8,
