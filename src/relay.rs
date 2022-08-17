@@ -362,7 +362,27 @@ mod tests {
 	use super::*;
 
 	#[test]
-	fn new_internal_buf() {
+	fn ib_new() {
 		InternalBuf::default();
+	}
+	#[test]
+	fn ib_clear() {
+		// Make a new buffer
+		let mut ib = InternalBuf::default();
+		let msg = b"this is a test message";
+		ib.buf[0..msg.len()].copy_from_slice(&msg[..]);
+		ib.filled += msg.len();
+		// Clear out "this is a "
+		let cleared = b"this is a ".len();
+		ib.clear(cleared);
+		// Make sure filled gets updated
+		assert_eq!(ib.filled, msg.len() - cleared);
+		// Make sure the remaining data is updated
+		//  to "a test message"
+		assert_eq!(ib.buf[0..ib.filled], msg[cleared..]);
+	}
+	#[test]
+	fn ib_encrypt_into() {
+		todo!()
 	}
 }
