@@ -40,7 +40,8 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 //      - the nonce (12 bytes)
 //      - the data
 //      - the authentication tag (16 bytes)
-const MSG_SIZE_FIELD: usize = 2;
+type MsgSize = u16;
+const MSG_SIZE_FIELD: usize = std::mem::size_of::<MsgSize>();
 const MSG_NONCE_FIELD: usize = 12;
 const MSG_AUTH_FIELD: usize = 16;
 const MSG_BLOCK_SIZE: usize = 16;
@@ -70,7 +71,7 @@ impl InternalBuf {
 	fn next_decrypt_len(&self) -> Option<usize> {
 		// First, check if there's a full message to decrypt
 		if self.filled >= MSG_SIZE_FIELD {
-			let enc_msg_size = usize::from(u16::from_be_bytes(
+			let enc_msg_size = usize::from(MsgSize::from_be_bytes(
 				self.buf[0..MSG_SIZE_FIELD].try_into().ok()?,
 			))
 			// This min ensures that a manipulated size field is still
@@ -169,7 +170,7 @@ impl InternalBuf {
 		// Build the encrypted message onto self.buf:
 		//  |--size--|--nonce--|--ciphertext--|
 		//  size:
-		let total_size: u16 =
+		let total_size: MsgSize =
 			(MSG_SIZE_FIELD + nonce.len() + ct.len()).try_into()?;
 		self.extend(&total_size.to_be_bytes());
 		//  nonce:
@@ -383,6 +384,28 @@ mod tests {
 		//  to "a test message"
 		assert_eq!(ib.buf[0..ib.filled], msg[cleared..]);
 	}
+    #[test]
+    fn ib_encrypt_decrypt() {
+        // Test that encrypt and decrypt work together
+        let mut ib0 = InternalBuf::default();
+        let mut ib1 = InternalBuf::default();
+        let mut ib2 = InternalBuf::default();
+        // Start with some data in ib0
+        let zeros = [0u8;32];
+		let mut rng = SmallRng::from_seed(zeros.clone());
+        let mut msg = [0u8;512];
+        rng.try_fill_bytes(&mut msg).unwrap();
+        ib0.extend(&msg);
+        // Make a cipher for enc / dec
+        let mut enc_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
+        let mut dec_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
+        // Encrypt from i0 to i1
+        ib0.encrypt_into(&mut ib1, &mut enc_cipher, &mut rng).unwrap();
+        // Decrypt from i1 to i2
+        ib1.decrypt_into(&mut ib2, &mut dec_cipher).unwrap();
+        // Ensure we got the message back
+        assert_eq!(&ib2.buf[..ib2.filled], &msg);
+    }
 	#[test]
 	fn ib_encrypt_into_small() {
 		// Create two buffers
@@ -408,10 +431,10 @@ mod tests {
 		//  MSG_NONCE_FIELD +
 		//  msg.len() +
 		//  MSG_AUTH_FIELD
-		let expected_size: u8 =
+		let expected_size: MsgSize =
 			(INTERNALBUF_META + msg.len()).try_into().unwrap();
-		assert_eq!(&dst.buf[0..MSG_SIZE_FIELD], [0, expected_size]);
-		// The nonce should be the same every try due to constant rng
+		assert_eq!(&dst.buf[0..MSG_SIZE_FIELD], expected_size.to_be_bytes());
+		// The nonce should be the same every time due to constant rng
 		//  seed in this test:
 		let nonce = vec![
 			0xDF, 0x23, 0x0B, 0x49, 0x61, 0x5D, 0x17, 0x53, 0x3D,
@@ -422,7 +445,7 @@ mod tests {
 				[MSG_SIZE_FIELD..MSG_SIZE_FIELD + MSG_NONCE_FIELD],
 			&nonce
 		);
-		// The remainder of the message should be this according to
+		// The ct (excluding auth tag) should be this according to
 		//  an independent encryption in python
 		let ct = vec![
 			0x95, 0x17, 0xF5, 0x23, 0x32, 0xF5, 0x32, 0xE5, 0x74,
@@ -431,9 +454,9 @@ mod tests {
 			0xF9, 0x75, 0xE4, 0x7D, 0x8A, 0x48, 0x16, 0x4B, 0x6E,
 			0x7B, 0xF9,
 		];
+        let ct_start = MSG_SIZE_FIELD + MSG_NONCE_FIELD;
 		assert_eq!(
-			&dst.buf[MSG_SIZE_FIELD + MSG_NONCE_FIELD
-				..dst.filled - MSG_AUTH_FIELD],
+			&dst.buf[ct_start..ct_start+ct.len()],
 			&ct,
 			"Ciphertext did not match the encrypted message."
 		);
@@ -451,5 +474,6 @@ mod tests {
 	#[test]
 	fn ib_decrypt_into_multiple() {
 		// Test when multiple messages are ready to be decrypted
+        todo!()
 	}
 }
