@@ -464,32 +464,72 @@ mod tests {
 	#[test]
 	fn ib_encrypt_into_partial() {
 		// Test when src has more data to encrypt than dst can support
-        let mut ib0 = InternalBuf::default();
-        let mut ib1 = InternalBuf::default();
-        // Start with some data in ib0
+        let mut src = InternalBuf::default();
+        let mut dst = InternalBuf::default();
+        // Start with some data in src
         let zeros = [0u8;32];
 		let mut rng = SmallRng::from_seed(zeros.clone());
         let mut msg = [0u8;999];
         rng.try_fill_bytes(&mut msg).unwrap();
-        ib0.extend(&msg);
-        // Have ib1 only have room for 20 bytes
-        ib1.filled = INTERNALBUF_MAX_SIZE - INTERNALBUF_META - 20;
+        src.extend(&msg);
+        // Have dst only have room for 20 bytes
+        dst.filled = INTERNALBUF_MAX_SIZE - INTERNALBUF_META - 20;
         // Make a cipher for encrypting
         let mut enc_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
         // Encrypt from i0 to i1
-        ib0.encrypt_into(&mut ib1, &mut enc_cipher, &mut rng).unwrap();
+        src.encrypt_into(&mut dst, &mut enc_cipher, &mut rng).unwrap();
         // Ensure the right amount was copied
-        assert_eq!(ib1.filled, INTERNALBUF_MAX_SIZE);
-        assert_eq!(ib0.filled, msg.len()-20);
+        assert_eq!(dst.filled, INTERNALBUF_MAX_SIZE);
+        assert_eq!(src.filled, msg.len()-20);
 	}
 	#[test]
 	fn ib_decrypt_into_single() {
 		// Test when one message needs to be decrypted from src
-		todo!()
+        let mut src = InternalBuf::default();
+        let mut dst = InternalBuf::default();
+        // This ciphertext is generated from python pycryptodome:
+        // AES.new(bytearray(32), AES.MODE_GCM, nonce=b"0123456789ab")
+        //  .encrypt_and_digest(b'12345 ==== this is a message ==== 6789')
+        let ct = vec![
+            0x00, 0x44,
+            0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x61, 0x62,
+            0x27, 0xB4, 0x4E, 0x64, 0x27, 0xD3, 0x96, 0xE9, 0xA0, 0x45, 0x3D, 0x1B, 0xF7, 0xF4, 0x6B, 0xD2, 0x3B, 0x1D, 0xF9, 0x73, 0x9C, 0xE7, 0xCD, 0x1B, 0x63, 0x49, 0x6E, 0xD8, 0x7E, 0xDD, 0x62, 0x61, 0x2C, 0x37, 0x3F, 0x2A, 0xAD, 0xDD, 
+            0x75, 0x62, 0xAE, 0x7A, 0x42, 0x9B, 0xBA, 0xB3, 0x84, 0xBB, 0x72, 0x4B, 0xD0, 0x8C, 0x5C, 0xD6
+        ]; 
+        src.extend(&ct);
+        // Make a cipher for decrypting
+        let zeros = [0u8;32];
+        let mut dec_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
+        // Decrypt
+        src.decrypt_into(&mut dst, &mut dec_cipher).unwrap();
+        // Check result
+        let msg = b"12345 ==== this is a message ==== 6789";
+        assert_eq!(&dst.buf[..dst.filled], &msg[..]);
 	}
 	#[test]
 	fn ib_decrypt_into_multiple() {
 		// Test when multiple messages are ready to be decrypted
-        todo!()
+        let mut src = InternalBuf::default();
+        let mut dst = InternalBuf::default();
+        // This ciphertext is generated from python pycryptodome:
+        // AES.new(bytearray(32), AES.MODE_GCM, nonce=b"0123456789ab")
+        //  .encrypt_and_digest(b'12345 ==== this is a message ==== 6789')
+        let ct = vec![
+            0x00, 0x44,
+            0x30, 0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39, 0x61, 0x62,
+            0x27, 0xB4, 0x4E, 0x64, 0x27, 0xD3, 0x96, 0xE9, 0xA0, 0x45, 0x3D, 0x1B, 0xF7, 0xF4, 0x6B, 0xD2, 0x3B, 0x1D, 0xF9, 0x73, 0x9C, 0xE7, 0xCD, 0x1B, 0x63, 0x49, 0x6E, 0xD8, 0x7E, 0xDD, 0x62, 0x61, 0x2C, 0x37, 0x3F, 0x2A, 0xAD, 0xDD, 
+            0x75, 0x62, 0xAE, 0x7A, 0x42, 0x9B, 0xBA, 0xB3, 0x84, 0xBB, 0x72, 0x4B, 0xD0, 0x8C, 0x5C, 0xD6
+        ]; 
+        src.extend(&ct);
+        src.extend(&ct);
+        // Make a cipher for decrypting
+        let zeros = [0u8;32];
+        let mut dec_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
+        // Decrypt
+        src.decrypt_into(&mut dst, &mut dec_cipher).unwrap();
+        // Check result
+        let msg = b"12345 ==== this is a message ==== 6789";
+        assert_eq!(&dst.buf[..msg.len()], &msg[..]);
+        assert_eq!(&dst.buf[msg.len()..2*msg.len()], &msg[..]);
 	}
 }
