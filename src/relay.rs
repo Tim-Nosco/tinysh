@@ -6,7 +6,7 @@ use aes_gcm::{
 	Aes256Gcm, Nonce,
 };
 use anyhow::{anyhow, Result};
-use rand_core::{CryptoRng, RngCore};
+use rand_core::RngCore;
 use std::io::{Error, Read, Write};
 use std::os::unix::io::AsRawFd;
 
@@ -122,11 +122,16 @@ impl InternalBuf {
 				break;
 			}
 			let msg = self.decrypt(cipher)?;
-			let filled = dst.filled;
-			dst.buf[filled..filled + msg.len()].copy_from_slice(&msg);
-			dst.filled += msg.len();
+			dst.extend(&msg);
 		}
 		Ok(())
+	}
+	// Add a msg to the unfilled part of the buffer if there's room
+	//  otherwise, panic
+	fn extend(&mut self, msg: &[u8]) {
+		self.buf[self.filled..self.filled + msg.len()]
+			.copy_from_slice(&msg);
+		self.filled += msg.len();
 	}
 	// Query how much space is left for new data
 	fn remains(&self, raw: bool) -> usize {
@@ -164,17 +169,11 @@ impl InternalBuf {
 		//  size:
 		let total_size: u16 =
 			(MSG_SIZE_FIELD + nonce.len() + ct.len()).try_into()?;
-		self.buf[self.filled..self.filled + MSG_SIZE_FIELD]
-			.copy_from_slice(&total_size.to_be_bytes());
-		self.filled += MSG_SIZE_FIELD;
+		self.extend(&total_size.to_be_bytes());
 		//  nonce:
-		self.buf[self.filled..self.filled + nonce.len()]
-			.copy_from_slice(&nonce);
-		self.filled += nonce.len();
+		self.extend(&nonce);
 		// ciphertext
-		self.buf[self.filled..self.filled + ct.len()]
-			.copy_from_slice(&ct);
-		self.filled += ct.len();
+		self.extend(&ct);
 		Ok(())
 	}
 	// Take data from self, encrypt it, and store it in another buffer
@@ -185,7 +184,7 @@ impl InternalBuf {
 		rng: &mut R,
 	) -> Result<()>
 	where
-		R: RngCore + CryptoRng,
+		R: RngCore,
 	{
 		// calculate how much we can encrypt
 		let mut max_msg_size = dst.remains(false);
@@ -231,7 +230,7 @@ where
 	A: Read + AsRawFd,
 	B: Write + AsRawFd,
 	C: Read + AsRawFd + Write,
-	R: CryptoRng + RngCore,
+	R: RngCore,
 {
 	// Create an array for fd events
 	// 1 for side of the two duplexes
@@ -360,6 +359,8 @@ where
 #[cfg(test)]
 mod tests {
 	use super::*;
+	use rand::rngs::SmallRng;
+	use rand::SeedableRng;
 
 	#[test]
 	fn ib_new() {
@@ -370,8 +371,7 @@ mod tests {
 		// Make a new buffer
 		let mut ib = InternalBuf::default();
 		let msg = b"this is a test message";
-		ib.buf[0..msg.len()].copy_from_slice(&msg[..]);
-		ib.filled += msg.len();
+		ib.extend(&msg[..]);
 		// Clear out "this is a "
 		let cleared = b"this is a ".len();
 		ib.clear(cleared);
@@ -382,7 +382,67 @@ mod tests {
 		assert_eq!(ib.buf[0..ib.filled], msg[cleared..]);
 	}
 	#[test]
-	fn ib_encrypt_into() {
+	fn ib_encrypt_into_small() {
+		// Create two buffers
+		let mut src = InternalBuf::default();
+		let mut dst = InternalBuf::default();
+		// Add some data to encrypt
+		let msg = b"12345 ==== this is a message ==== 6789";
+		src.extend(&msg[..]);
+		// Setup the cipher
+		let key = [0u8; 32];
+		let mut rng = SmallRng::from_seed(key.clone());
+		let mut cipher = Aes256Gcm::new_from_slice(&key).unwrap();
+		// Encrypt it into dst
+		src.encrypt_into(&mut dst, &mut cipher, &mut rng).unwrap();
+		// Test the output
+		println!("Encrypted: {:02X?}", &dst.buf[0..dst.filled]);
+		// The message size should be:
+		//  MSG_SIZE_FIELD +
+		//  MSG_NONCE_FIELD +
+		//  msg.len() +
+		//  MSG_AUTH_FIELD
+		let expected_size: u8 =
+			(INTERNALBUF_META + msg.len()).try_into().unwrap();
+		assert_eq!(&dst.buf[0..MSG_SIZE_FIELD], [0, expected_size]);
+		// The nonce should be the same every try due to constant rng
+		//  seed in this test:
+		let nonce = vec![
+			0xDF, 0x23, 0x0B, 0x49, 0x61, 0x5D, 0x17, 0x53, 0x3D,
+			0x6F, 0xDA, 0x61,
+		];
+		assert_eq!(
+			&dst.buf
+				[MSG_SIZE_FIELD..MSG_SIZE_FIELD + MSG_NONCE_FIELD],
+			&nonce
+		);
+		// The remainder of the message should be this according to
+		//  an independent encryption in python
+		let ct = vec![
+			0x95, 0x17, 0xF5, 0x23, 0x32, 0xF5, 0x32, 0xE5, 0x74,
+			0x9C, 0x34, 0x6E, 0x7C, 0x6A, 0xF6, 0xA7, 0x84, 0xF4,
+			0xD8, 0x99, 0xB2, 0x9A, 0x37, 0x87, 0x2F, 0x48, 0x69,
+			0xF9, 0x75, 0xE4, 0x7D, 0x8A, 0x48, 0x16, 0x4B, 0x6E,
+			0x7B, 0xF9,
+		];
+		assert_eq!(
+			&dst.buf[MSG_SIZE_FIELD + MSG_NONCE_FIELD
+				..dst.filled - MSG_AUTH_FIELD],
+			&ct
+		);
+	}
+	#[test]
+	fn ib_encrypt_into_partial() {
+		// Test when src has more data to encrypt than dst can support
 		todo!()
+	}
+	#[test]
+	fn ib_decrypt_into_single() {
+		// Test when one message needs to be decrypted from src
+		todo!()
+	}
+	#[test]
+	fn ib_decrypt_into_multiple() {
+		// Test when multiple messages are ready to be decrypted
 	}
 }

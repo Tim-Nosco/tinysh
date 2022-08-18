@@ -16,6 +16,9 @@ lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
 os_pipe = "*"
 
+[dev-dependencies]
+rand = { version = "*", features = ["small_rng"] }
+
 [profile.dev]
 # Must always use panic = "abort" to avoid needing to define the unstable eh_personality lang item.
 panic = "unwind"
