@@ -464,7 +464,23 @@ mod tests {
 	#[test]
 	fn ib_encrypt_into_partial() {
 		// Test when src has more data to encrypt than dst can support
-		todo!()
+        let mut ib0 = InternalBuf::default();
+        let mut ib1 = InternalBuf::default();
+        // Start with some data in ib0
+        let zeros = [0u8;32];
+		let mut rng = SmallRng::from_seed(zeros.clone());
+        let mut msg = [0u8;999];
+        rng.try_fill_bytes(&mut msg).unwrap();
+        ib0.extend(&msg);
+        // Have ib1 only have room for 20 bytes
+        ib1.filled = INTERNALBUF_MAX_SIZE - INTERNALBUF_META - 20;
+        // Make a cipher for encrypting
+        let mut enc_cipher = Aes256Gcm::new_from_slice(&zeros).unwrap();
+        // Encrypt from i0 to i1
+        ib0.encrypt_into(&mut ib1, &mut enc_cipher, &mut rng).unwrap();
+        // Ensure the right amount was copied
+        assert_eq!(ib1.filled, INTERNALBUF_MAX_SIZE);
+        assert_eq!(ib0.filled, msg.len()-20);
 	}
 	#[test]
 	fn ib_decrypt_into_single() {
