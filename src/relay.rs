@@ -483,7 +483,7 @@ mod tests {
         assert_eq!(src.filled, msg.len()-20);
 	}
 	#[test]
-	fn ib_decrypt_into_single() {
+	fn ib_decrypt_into_single_msg() {
 		// Test when one message needs to be decrypted from src
         let mut src = InternalBuf::default();
         let mut dst = InternalBuf::default();
@@ -507,7 +507,7 @@ mod tests {
         assert_eq!(&dst.buf[..dst.filled], &msg[..]);
 	}
 	#[test]
-	fn ib_decrypt_into_multiple() {
+	fn ib_decrypt_into_multiple_msgs() {
 		// Test when multiple messages are ready to be decrypted
         let mut src = InternalBuf::default();
         let mut dst = InternalBuf::default();
@@ -532,4 +532,14 @@ mod tests {
         assert_eq!(&dst.buf[..msg.len()], &msg[..]);
         assert_eq!(&dst.buf[msg.len()..2*msg.len()], &msg[..]);
 	}
+    #[test]
+    #[ignore]
+    fn relay_encrypts() {
+        todo!()
+    }
+    #[test]
+    #[ignore]
+    fn relay_send_and_recv() {
+        todo!()
+    }
 }
