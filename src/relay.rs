@@ -142,8 +142,10 @@ impl InternalBuf {
 			// auth tag if encrypted
 			let pt_no_blocks = INTERNALBUF_MAX_SIZE
 				.saturating_sub(self.filled + INTERNALBUF_META);
-			// account for block size
-			pt_no_blocks.saturating_sub(pt_no_blocks % MSG_BLOCK_SIZE)
+			// account for block size if using a scheme that needs it
+			// pt_no_blocks.saturating_sub(pt_no_blocks %
+			// MSG_BLOCK_SIZE)
+			pt_no_blocks
 		}
 	}
 	// Add data to the buffer, encrypting it first
@@ -396,7 +398,11 @@ mod tests {
 		// Encrypt it into dst
 		src.encrypt_into(&mut dst, &mut cipher, &mut rng).unwrap();
 		// Test the output
-		println!("Encrypted: {:02X?}", &dst.buf[0..dst.filled]);
+		println!(
+			"Encrypted size: {}\n{:02X?}",
+			dst.filled,
+			&dst.buf[0..dst.filled]
+		);
 		// The message size should be:
 		//  MSG_SIZE_FIELD +
 		//  MSG_NONCE_FIELD +
@@ -428,7 +434,8 @@ mod tests {
 		assert_eq!(
 			&dst.buf[MSG_SIZE_FIELD + MSG_NONCE_FIELD
 				..dst.filled - MSG_AUTH_FIELD],
-			&ct
+			&ct,
+			"Ciphertext did not match the encrypted message."
 		);
 	}
 	#[test]
