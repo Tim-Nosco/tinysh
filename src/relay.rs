@@ -10,6 +10,7 @@ use rand_core::RngCore;
 use std::io::{Error, Read, Write};
 use std::os::unix::io::AsRawFd;
 
+#[allow(unused_imports)]
 use crate::util::debug;
 
 // Use this struct to act like a socket with read and write calls
@@ -118,7 +119,7 @@ impl InternalBuf {
 	) -> Result<()> {
 		// while there's room to decrypt messages
 		while let Some(decrypted_size) = self.next_decrypt_len() {
-			debug!("decrypting");
+			// debug!("decrypting");
 			if decrypted_size > dst.remains(true) {
 				break;
 			}
@@ -194,7 +195,7 @@ impl InternalBuf {
 		// ensure we don't pull more than we have
 		max_msg_size = max_msg_size.min(self.filled);
 		if max_msg_size > 0 {
-			debug!("encrypting {} bytes", max_msg_size);
+			// debug!("encrypting {} bytes", max_msg_size);
 			// Fill up the remaining space in dst with a new
 			// message
 			// Next, extract out the message we want to encrypt
@@ -277,7 +278,7 @@ where
 		{
 			Err(anyhow!("Error using poll."))?;
 		}
-		debug!("poll returns!");
+		// debug!("poll returns!");
 		// Go through each revent and respond to POLLIN or POLLOUT as
 		// needed
 		for (idx, fd) in fds.iter().enumerate() {
@@ -285,14 +286,14 @@ where
 			let mut buf = &mut bufs[idx];
 			// Ready to recv
 			if 0 < (fd.revents & libc::POLLIN) {
-				debug!("POLLIN on {}", idx);
+				// debug!("POLLIN on {}", idx);
 				let max_recv = buf.remains(true);
 				let this_node: &mut (dyn Read) =
 					if 0 < (idx & 0b10) { node1 } else { node0 };
 				let read_amt = this_node.read(
 					&mut buf.buf[buf.filled..buf.filled + max_recv],
 				)?;
-				debug!("- read: {} bytes", read_amt);
+				// debug!("- read: {} bytes", read_amt);
 				if read_amt == 0 {
 					// We got POLLIN, but read 0 bytes.
 					// This is a polite way of conducting a socket
@@ -300,11 +301,11 @@ where
 					Err(anyhow!("Node shutdown"))?;
 				}
 				buf.filled += read_amt;
-				debug!("- filled {}: {}", idx, buf.filled);
+				// debug!("- filled {}: {}", idx, buf.filled);
 			}
 			// Ready to send
 			if 0 < (fd.revents & libc::POLLOUT) {
-				debug!("POLLOUT on {}", idx);
+				// debug!("POLLOUT on {}", idx);
 				let this_node: &mut (dyn Write) =
 					if 0 < (idx & 0b10) { node1 } else { node0 };
 				buf.clear(this_node.write(&buf.buf[0..buf.filled])?);
@@ -343,7 +344,7 @@ where
 			if 0 < idx & 0b01 {
 				// and there's stuff to write
 				if 0 < bufs[idx].filled {
-					debug!("setting POLLOUT on {}", idx);
+					// debug!("setting POLLOUT on {}", idx);
 					fds[idx].events |= libc::POLLOUT;
 				}
 			}
@@ -351,7 +352,7 @@ where
 			else {
 				// and there's room to read things
 				if 0 < bufs[idx].remains(true) {
-					debug!("setting POLLIN on {}", idx);
+					// debug!("setting POLLIN on {}", idx);
 					fds[idx].events |= libc::POLLIN;
 				}
 			}
