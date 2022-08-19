@@ -2,7 +2,7 @@
 extern crate libc;
 
 use aes_gcm::{
-	aead::{heapless::Vec, Aead, AeadInPlace, KeyInit},
+	aead::{heapless::Vec, AeadInPlace, KeyInit},
 	Aes256Gcm, Nonce,
 };
 use anyhow::{anyhow, Result};
