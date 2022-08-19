@@ -148,36 +148,6 @@ impl InternalBuf {
 			pt_no_blocks
 		}
 	}
-	// Add data to the buffer, encrypting it first
-	fn extend_encrypted<R>(
-		&mut self,
-		cipher: &mut Aes256Gcm,
-		msg: &[u8],
-		rng: &mut R,
-	) -> Result<()>
-	where
-		R: RngCore,
-	{
-		// Make a new nonce
-		let mut nonce_raw = [0u8; MSG_NONCE_FIELD];
-		rng.try_fill_bytes(&mut nonce_raw)?;
-		let nonce = Nonce::from_slice(&nonce_raw);
-		// Encrypt the message
-		let ct = cipher
-			.encrypt(nonce, msg)
-			.or(Err(anyhow!("Unable to encrypt.")))?;
-		// Build the encrypted message onto self.buf:
-		//  |--size--|--nonce--|--ciphertext--|
-		//  size:
-		let total_size: MsgSize =
-			(MSG_SIZE_FIELD + nonce.len() + ct.len()).try_into()?;
-		self.extend(&total_size.to_be_bytes());
-		//  nonce:
-		self.extend(&nonce);
-		// ciphertext
-		self.extend(&ct);
-		Ok(())
-	}
 	// Take data from self, encrypt it, and store it in another buffer
 	fn encrypt_into<R>(
 		&mut self,
@@ -196,12 +166,31 @@ impl InternalBuf {
 			// debug!("encrypting {} bytes", max_msg_size);
 			// Fill up the remaining space in dst with a new
 			// message
-			// Next, extract out the message we want to encrypt
-			let msg = &self.buf[0..max_msg_size];
-			// Encrypt it
-			dst.extend_encrypted(cipher, &msg, rng)?;
+			// Extract out the message we want to encrypt
+			let mut msg: Vec<u8, INTERNALBUF_MAX_SIZE> = Vec::new();
+			msg.extend_from_slice(&self.buf[0..max_msg_size])
+				.or(Err(anyhow!("Unable to copy to stack.")))?;
 			// Discard the used content
-			self.clear(msg.len());
+			self.clear(max_msg_size);
+			// Make a new nonce
+			let mut nonce_raw = [0u8; MSG_NONCE_FIELD];
+			rng.try_fill_bytes(&mut nonce_raw)?;
+			let nonce = Nonce::from_slice(&nonce_raw);
+			// Encrypt the message
+			cipher
+				.encrypt_in_place(nonce, b"", &mut msg)
+				.or(Err(anyhow!("Unable to encrypt.")))?;
+			// Build the encrypted message onto self.buf:
+			//  |--size--|--nonce--|--ciphertext--|
+			//  size:
+			let total_size: MsgSize = (MSG_SIZE_FIELD
+				+ nonce.len() + msg.len())
+			.try_into()?;
+			dst.extend(&total_size.to_be_bytes());
+			//  nonce:
+			dst.extend(&nonce);
+			// ciphertext
+			dst.extend(&msg[..msg.len()]);
 		}
 		Ok(())
 	}

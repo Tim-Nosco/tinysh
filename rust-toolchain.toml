@@ -1,6 +1,6 @@
 [toolchain]
 channel = "nightly"
-components = [ "rust-src" ]
+components = [ "rust-src", "rustfmt" ]
 targets = [ "x86_64-unknown-linux-gnu",
             "aarch64-unknown-linux-musl",
             "arm-unknown-linux-musleabi",

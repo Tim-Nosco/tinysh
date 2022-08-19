@@ -11,7 +11,7 @@ libc = "*"
 anyhow = "*"
 thiserror = "*"
 sha2 = "*"
-aes-gcm = { version = "0.10.1", features = ["aes"] }
+aes-gcm = { version = "0.10.1", features = ["aes", "heapless"] }
 lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
 os_pipe = "*"
