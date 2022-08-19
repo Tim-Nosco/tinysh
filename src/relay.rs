@@ -2,7 +2,7 @@
 extern crate libc;
 
 use aes_gcm::{
-	aead::{Aead, KeyInit},
+	aead::{heapless::Vec, Aead, AeadInPlace, KeyInit},
 	Aes256Gcm, Nonce,
 };
 use anyhow::{anyhow, Result};
@@ -88,28 +88,6 @@ impl InternalBuf {
 			None
 		}
 	}
-	// Return a decrypted message from the interal buffer (and clear
-	// decrypted)
-	fn decrypt(&mut self, cipher: &mut Aes256Gcm) -> Result<Vec<u8>> {
-		// Check that there's a full message
-		if let Some(dec_msg_size) = self.next_decrypt_len() {
-			let nonce = Nonce::from_slice(
-				&self.buf[MSG_SIZE_FIELD
-					..MSG_SIZE_FIELD + MSG_NONCE_FIELD],
-			);
-			let pt = cipher
-				.decrypt(
-					nonce,
-					&self.buf[MSG_SIZE_FIELD + MSG_NONCE_FIELD
-						..INTERNALBUF_META + dec_msg_size],
-				)
-				.or(Err(anyhow!("Unable to decrypt")));
-			self.clear(INTERNALBUF_META + dec_msg_size);
-			pt
-		} else {
-			Err(anyhow!("Not enough data to decrypt completely"))
-		}
-	}
 	// Take existing encrypted messages from self and write them into
 	// another buffer
 	fn decrypt_into(
@@ -117,14 +95,34 @@ impl InternalBuf {
 		dst: &mut InternalBuf,
 		cipher: &mut Aes256Gcm,
 	) -> Result<()> {
+		// Make some space for decrypting
+		let mut working: Vec<u8, INTERNALBUF_MAX_SIZE> = Vec::new();
 		// while there's room to decrypt messages
 		while let Some(decrypted_size) = self.next_decrypt_len() {
 			// debug!("decrypting");
 			if decrypted_size > dst.remains(true) {
 				break;
 			}
-			let msg = self.decrypt(cipher)?;
-			dst.extend(&msg);
+			// Pull out the nonce
+			let nonce = Nonce::from_slice(
+				&self.buf[MSG_SIZE_FIELD
+					..MSG_SIZE_FIELD + MSG_NONCE_FIELD],
+			);
+			// Figure out where the ciphertext is (including auth tag)
+			let start = MSG_SIZE_FIELD + MSG_NONCE_FIELD;
+			let end = INTERNALBUF_META + decrypted_size;
+			working
+				.extend_from_slice(&self.buf[start..end])
+				.or(Err(anyhow!("Unable to copy onto stack.")))?;
+			// Decrypt
+			cipher
+				.decrypt_in_place(nonce, b"", &mut working)
+				.or(Err(anyhow!("Unable to decrypt")))?;
+			// Copy into dst
+			dst.extend(&working[..decrypted_size]);
+			// Cleanup
+			working.clear();
+			self.clear(INTERNALBUF_META + decrypted_size);
 		}
 		Ok(())
 	}
