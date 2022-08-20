@@ -11,7 +11,6 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use sha2::Sha256;
 use std::io::{Read, Write};
-use std::net::IpAddr;
 use std::str::FromStr;
 
 use crate::util::debug;
@@ -125,41 +124,4 @@ pub fn play_auth_challenge_local<A: Write + Read>(
 	// challenge, &signed_chal) );
 	sock.write(&signed_chal_b)?;
 	Ok(())
-}
-
-// The ecdh library expects the PEM in a certain format
-//  use this function to convert from straight b64 to
-//  the expected format.
-fn format_public_key(b64_pem: &str) -> String {
-	// add a newline after each 64 chars
-	let nl_sep_pem = b64_pem.chars().enumerate().fold(
-		String::new(),
-		|acc, (i, c)| {
-			if i == 64 {
-				format!("{}\n{}", acc, c)
-			} else {
-				format!("{}{}", acc, c)
-			}
-		},
-	);
-	// add the beginning and end
-	format!(
-		"-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
-		nl_sep_pem
-	)
-}
-
-// Get remote's info from argv
-pub fn get_local_info(
-	argv: Vec<String>,
-) -> Result<(IpAddr, PublicKey)> {
-	if argv.len() < 3 {
-		return Err(anyhow!("Expecting 2 arguments"));
-	}
-	// Parse the IP
-	let ip = argv[1].parse()?;
-	// Parse the public key which should just be the base64 component
-	// on a single line
-	let pubkey = PublicKey::from_str(&format_public_key(&argv[2]))?;
-	Ok((ip, pubkey))
 }

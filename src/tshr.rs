@@ -12,15 +12,15 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 #[allow(unused_imports)]
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
-use kex::{
-	get_local_info, play_auth_challenge_remote, play_dh_kex_remote,
-};
+use kex::{play_auth_challenge_remote, play_dh_kex_remote};
+use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use relay::{relay, RelayNode};
 use std::ffi::{c_char, CStr};
-use std::net::{SocketAddr, TcpStream};
+use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::process::Command;
+use std::str::FromStr;
 use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
@@ -39,29 +39,60 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	}
 }
 
+// The ecdh library expects the PEM in a certain format
+//  use this function to convert from straight b64 to
+//  the expected format.
+fn format_public_key(b64_pem: &str) -> String {
+	// add a newline after each 64 chars
+	let nl_sep_pem = b64_pem.chars().enumerate().fold(
+		String::new(),
+		|acc, (i, c)| {
+			if i == 64 {
+				format!("{}\n{}", acc, c)
+			} else {
+				format!("{}{}", acc, c)
+			}
+		},
+	);
+	// add the beginning and end
+	format!(
+		"-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
+		nl_sep_pem
+	)
+}
+
 #[cfg_attr(not(test), no_mangle)]
 pub fn main(
 	argc: i32,
 	argv: *const *const u8,
 	envp: *const *const u8,
 ) -> i8 {
-	// Build argv into rust vec
-	let argv_vec = unsafe {
-		let argv_vec_ptrs =
-			std::slice::from_raw_parts(argv, argc as usize);
-		argv_vec_ptrs
-			.iter()
-			.map(|x| {
-				CStr::from_ptr(*x as *const c_char)
-					.to_string_lossy()
-					.into_owned()
-			})
-			.collect()
-	};
+	// Check that we have the args
+	if argc < 3 {
+		return 1;
+	}
 
-	// Parse the IP addr and public key from argv
-	let (ipaddr_l, pub_l) = get_local_info(argv_vec)
-		.expect("Failed to parse remote pub key and ip addr");
+	// Build argv into rust vec
+	let argv_ptrs =
+		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
+	let ip_str = unsafe {
+		CStr::from_ptr(argv_ptrs[1] as *const c_char)
+			.to_string_lossy()
+			.into_owned()
+	};
+	let key_str = unsafe {
+		CStr::from_ptr(argv_ptrs[2] as *const c_char)
+			.to_string_lossy()
+			.into_owned()
+	};
+	// Parse the IP
+	let ipaddr_l: Ipv4Addr =
+		ip_str.parse().expect("Failed to parse IP");
+	// Parse the public key which should just be the base64 component
+	// on a single line
+	let pub_l = PublicKey::from_str(&format_public_key(&key_str))
+		.expect("Failed to parse public key");
+
 	debug!(
 		"Found local's key:\n{:#}\nAnd address: {:#}",
 		pub_l.to_string(),
