@@ -42,23 +42,27 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 // The ecdh library expects the PEM in a certain format
 //  use this function to convert from straight b64 to
 //  the expected format.
-fn format_public_key(b64_pem: &str) -> String {
-	// add a newline after each 64 chars
-	let nl_sep_pem = b64_pem.chars().enumerate().fold(
-		String::new(),
-		|acc, (i, c)| {
-			if i == 64 {
-				format!("{}\n{}", acc, c)
-			} else {
-				format!("{}{}", acc, c)
-			}
-		},
-	);
-	// add the beginning and end
-	format!(
-		"-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
-		nl_sep_pem
-	)
+fn format_public_key(b64_pem: &str) -> [u8; 1024] {
+	let mut rebuilt = [0u8; 1024];
+	let mut filled = 0;
+	// Add the beginning
+	let start = b"-----BEGIN PUBLIC KEY-----\n";
+	rebuilt[0..start.len()].copy_from_slice(&start[..]);
+	filled += start.len();
+	// Add all the chars
+	for (idx, c) in b64_pem.as_bytes().iter().enumerate() {
+		rebuilt[filled] = *c;
+		filled += 1;
+		// add a newline after each 64 chars
+		if idx == 64 {
+			rebuilt[filled] = b'\n';
+			filled += 1;
+		}
+	}
+	// Add the end
+	let end = b"\n-----END PUBLIC KEY-----";
+	rebuilt[filled..filled + end.len()].copy_from_slice(&end[..]);
+	rebuilt
 }
 
 #[cfg_attr(not(test), no_mangle)]
@@ -77,20 +81,22 @@ pub fn main(
 		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
 	let ip_str = unsafe {
 		CStr::from_ptr(argv_ptrs[1] as *const c_char)
-			.to_string_lossy()
-			.into_owned()
+			.to_str()
+			.unwrap()
 	};
 	let key_str = unsafe {
 		CStr::from_ptr(argv_ptrs[2] as *const c_char)
-			.to_string_lossy()
-			.into_owned()
+			.to_str()
+			.unwrap()
 	};
 	// Parse the IP
 	let ipaddr_l: Ipv4Addr =
 		ip_str.parse().expect("Failed to parse IP");
 	// Parse the public key which should just be the base64 component
-	// on a single line
-	let pub_l = PublicKey::from_str(&format_public_key(&key_str))
+	//  on a single line
+	let rebuilt = format_public_key(&key_str);
+	let rebuilt_str = std::str::from_utf8(&rebuilt).unwrap();
+	let pub_l = PublicKey::from_str(rebuilt_str)
 		.expect("Failed to parse public key");
 
 	debug!(
