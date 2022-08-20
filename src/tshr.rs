@@ -72,7 +72,7 @@ pub fn main(
 		return 1;
 	}
 
-	// Build argv into rust vec
+	// Parse argv
 	let argv_ptrs =
 		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
 	let ip_str = unsafe {
