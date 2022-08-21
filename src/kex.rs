@@ -124,7 +124,7 @@ pub fn play_auth_challenge_remote<
 	rng.try_fill_bytes(&mut challenge)
 		.or(Err(KexError::Write))?;
 	debug!("Created challenge:\n{:02X?}\n", challenge);
-	sock.write(&challenge).or(Err(KexError::Write));
+	sock.write(&challenge).or(Err(KexError::Write))?;
 
 	// recv the signed challenge
 	let mut signature_raw = [0u8; 64];

