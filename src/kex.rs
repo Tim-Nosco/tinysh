@@ -1,20 +1,34 @@
 #![allow(dead_code)]
 
-use anyhow::{anyhow, Result};
+use crate::util::debug;
+#[allow(unused_imports)]
+use anyhow::anyhow;
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
 use p256::ecdsa::{
 	signature::{Signature, Signer, Verifier},
 	SigningKey, VerifyingKey,
 };
+use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::{PublicKey, SecretKey};
 use rand_chacha::ChaCha20Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use sha2::Sha256;
 use std::io::{Read, Write};
-use std::net::IpAddr;
-use std::str::FromStr;
+use thiserror::Error;
 
-use crate::util::debug;
+#[derive(Error, Debug)]
+pub enum KexError {
+	#[error("play_dh_kex error")]
+	KeyDecode,
+	#[error("write error")]
+	Write,
+	#[error("read error")]
+	Read,
+	#[error("challenge error")]
+	Challenge,
+	#[error("calc shared secret")]
+	CalcSharedSecret,
+}
 
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
 	let rng = if let Some(imd) = seed {
@@ -27,18 +41,29 @@ pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
 	EphemeralSecret::random(rng)
 }
 
+const ENCODED_SEC1_LEN: usize = 512;
+const PUB_SIZE_FIELD: usize = 8;
+const ARCH_SIZE: usize = std::mem::size_of::<usize>();
+
 // Conduct the ECDH key exchange on remote
 pub fn play_dh_kex_remote<A: Write>(
 	writeable: &mut A,
 	pub_l: &PublicKey,
 	seed: Option<u64>,
-) -> Result<[u8; 32]> {
+) -> Result<[u8; 32], KexError> {
 	// Generate remote's keys
 	let secret_r = gen_key(seed);
-	let pub_r = secret_r.public_key().to_string();
-	let pub_r_fixed_size = format!("{:1$}", pub_r, 512);
+	let mut pub_r_fixed_size = [0u8; ENCODED_SEC1_LEN];
+	let pub_r = secret_r.public_key().to_encoded_point(true);
+	let size_size = PUB_SIZE_FIELD;
+	pub_r_fixed_size[size_size - ARCH_SIZE..size_size]
+		.copy_from_slice(&pub_r.as_bytes().len().to_be_bytes());
+	pub_r_fixed_size[size_size..size_size + pub_r.as_bytes().len()]
+		.copy_from_slice(&pub_r.as_bytes());
 	// Send public key to local
-	writeable.write(pub_r_fixed_size.as_bytes())?;
+	writeable
+		.write(&pub_r_fixed_size)
+		.or(Err(KexError::Write))?;
 
 	// Calculate the shared secret
 	let secret_hkdf =
@@ -46,7 +71,7 @@ pub fn play_dh_kex_remote<A: Write>(
 	let mut key = [0u8; 32];
 	secret_hkdf
 		.expand(&vec![0u8; 0], &mut key)
-		.or(Err(anyhow!("Unable to expand shared secret")))?;
+		.or(Err(KexError::CalcSharedSecret))?;
 	Ok(key)
 }
 
@@ -54,12 +79,21 @@ pub fn play_dh_kex_remote<A: Write>(
 pub fn play_dh_kex_local<T: Read + Write>(
 	sock: &mut T,
 	secret_l: &SecretKey,
-) -> Result<[u8; 32]> {
+) -> anyhow::Result<[u8; 32]> {
 	// Accept the other side's public key
-	let mut other_pub = [0u8; 512];
+	let mut other_pub = [0u8; ENCODED_SEC1_LEN];
 	sock.read_exact(&mut other_pub)?;
-	let pub_r =
-		PublicKey::from_str(std::str::from_utf8(&other_pub)?.trim())?;
+	// Parse for the pubkey size
+	let size_size = PUB_SIZE_FIELD;
+	let mut pub_size_bytes = [0u8; ARCH_SIZE];
+	pub_size_bytes.copy_from_slice(
+		&other_pub[size_size - ARCH_SIZE..size_size],
+	);
+	let pub_size = usize::from_be_bytes(pub_size_bytes);
+	// Parse the pubkey
+	let pub_r = PublicKey::from_sec1_bytes(
+		&other_pub[size_size..size_size + pub_size],
+	)?;
 	debug!("Got remote's pub key:\n{:#}", pub_r.to_string());
 	// Calculate the shared secret
 	let secret_hkdf = diffie_hellman(
@@ -83,21 +117,26 @@ pub fn play_auth_challenge_remote<
 	sock: &mut A,
 	pub_l: &PublicKey,
 	rng: &mut T,
-) -> Result<()> {
+) -> Result<(), KexError> {
 	// send the challenge
 	let mut challenge = [0u8; 128];
-	rng.try_fill_bytes(&mut challenge)?;
+	rng.try_fill_bytes(&mut challenge)
+		.or(Err(KexError::Write))?;
 	debug!("Created challenge:\n{:02X?}\n", challenge);
-	sock.write(&challenge)?;
+	sock.write(&challenge).or(Err(KexError::Write))?;
 
 	// recv the signed challenge
 	let mut signature_raw = [0u8; 64];
-	sock.read_exact(&mut signature_raw)?;
-	let signature = Signature::from_bytes(&signature_raw)?;
+	sock.read_exact(&mut signature_raw)
+		.or(Err(KexError::Read))?;
+	let signature = Signature::from_bytes(&signature_raw)
+		.or(Err(KexError::Challenge))?;
 	debug!("Recv'd local's signature:\n{:#}\n", signature);
 
 	// verify
-	VerifyingKey::from(pub_l).verify(&challenge, &signature)?;
+	VerifyingKey::from(pub_l)
+		.verify(&challenge, &signature)
+		.or(Err(KexError::Challenge))?;
 	Ok(())
 }
 
@@ -105,7 +144,7 @@ pub fn play_auth_challenge_remote<
 pub fn play_auth_challenge_local<A: Write + Read>(
 	sock: &mut A,
 	secret_l: &SecretKey,
-) -> Result<()> {
+) -> anyhow::Result<()> {
 	// recv the challenge
 	let mut challenge = [0u8; 128];
 	sock.read_exact(&mut challenge)?;
@@ -125,41 +164,4 @@ pub fn play_auth_challenge_local<A: Write + Read>(
 	// challenge, &signed_chal) );
 	sock.write(&signed_chal_b)?;
 	Ok(())
-}
-
-// The ecdh library expects the PEM in a certain format
-//  use this function to convert from straight b64 to
-//  the expected format.
-fn format_public_key(b64_pem: &str) -> String {
-	// add a newline after each 64 chars
-	let nl_sep_pem = b64_pem.chars().enumerate().fold(
-		String::new(),
-		|acc, (i, c)| {
-			if i == 64 {
-				format!("{}\n{}", acc, c)
-			} else {
-				format!("{}{}", acc, c)
-			}
-		},
-	);
-	// add the beginning and end
-	format!(
-		"-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----",
-		nl_sep_pem
-	)
-}
-
-// Get remote's info from argv
-pub fn get_local_info(
-	argv: Vec<String>,
-) -> Result<(IpAddr, PublicKey)> {
-	if argv.len() < 3 {
-		return Err(anyhow!("Expecting 2 arguments"));
-	}
-	// Parse the IP
-	let ip = argv[1].parse()?;
-	// Parse the public key which should just be the base64 component
-	// on a single line
-	let pubkey = PublicKey::from_str(&format_public_key(&argv[2]))?;
-	Ok((ip, pubkey))
 }

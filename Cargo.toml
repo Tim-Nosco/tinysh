@@ -8,13 +8,14 @@ p256 = { version = "*", features = ["ecdh", "ecdsa", "pem"] }
 rand_chacha = "*"
 rand_core = "*"
 libc = "*"
-anyhow = "*"
+anyhow = { version = "*" }
 thiserror = "*"
 sha2 = "*"
-aes-gcm = { version = "0.10.1", features = ["aes"] }
+aes-gcm = { version = "0.10.1", features = ["aes", "heapless"] }
 lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
 os_pipe = "*"
+base64ct = "*"
 
 [dev-dependencies]
 rand = { version = "*", features = ["small_rng"] }

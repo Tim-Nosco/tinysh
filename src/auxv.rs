@@ -1,11 +1,6 @@
-use anyhow::{anyhow, Result};
-
 // Extract a key from the auxiliary vector starting the search from
 // the environment pointer
-pub fn getauxval(
-	envp: *const *const u8,
-	key: usize,
-) -> Result<usize> {
+pub fn getauxval(envp: *const *const u8, key: usize) -> usize {
 	// First, find the end of the environment variables as denoted by
 	// a zero word
 	let mut ptr_idx = 0;
@@ -24,11 +19,9 @@ pub fn getauxval(
 		}
 		// We reached the end
 		else if libc::AT_NULL as usize == itr_key {
-			return Err(anyhow!(
-				"Unable to find key in auxiliary vector."
-			));
+			return 0;
 		}
 		ptr_idx += 2;
 	}
-	Ok(value)
+	value
 }
