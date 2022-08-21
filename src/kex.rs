@@ -23,6 +23,10 @@ pub enum KexError {
 	KeyDecode,
 	#[error("write error")]
 	Write,
+	#[error("read error")]
+	Read,
+	#[error("challenge error")]
+	Challenge,
 	#[error("calc shared secret")]
 	CalcSharedSecret,
 }
@@ -69,7 +73,6 @@ pub fn play_dh_kex_remote<A: Write>(
 	secret_hkdf
 		.expand(&vec![0u8; 0], &mut key)
 		.or(Err(KexError::CalcSharedSecret))?;
-	todo!();
 	Ok(key)
 }
 
@@ -115,21 +118,26 @@ pub fn play_auth_challenge_remote<
 	sock: &mut A,
 	pub_l: &PublicKey,
 	rng: &mut T,
-) -> anyhow::Result<()> {
+) -> Result<(), KexError> {
 	// send the challenge
 	let mut challenge = [0u8; 128];
-	rng.try_fill_bytes(&mut challenge)?;
+	rng.try_fill_bytes(&mut challenge)
+		.or(Err(KexError::Write))?;
 	debug!("Created challenge:\n{:02X?}\n", challenge);
-	sock.write(&challenge)?;
+	sock.write(&challenge).or(Err(KexError::Write));
 
 	// recv the signed challenge
 	let mut signature_raw = [0u8; 64];
-	sock.read_exact(&mut signature_raw)?;
-	let signature = Signature::from_bytes(&signature_raw)?;
+	sock.read_exact(&mut signature_raw)
+		.or(Err(KexError::Read))?;
+	let signature = Signature::from_bytes(&signature_raw)
+		.or(Err(KexError::Challenge))?;
 	debug!("Recv'd local's signature:\n{:#}\n", signature);
 
 	// verify
-	VerifyingKey::from(pub_l).verify(&challenge, &signature)?;
+	VerifyingKey::from(pub_l)
+		.verify(&challenge, &signature)
+		.or(Err(KexError::Challenge))?;
 	Ok(())
 }
 

@@ -130,7 +130,8 @@ pub fn main(
 		os_pipe::pipe().expect("Failed to open pipes");
 
 	// Exec the shell
-	Command::new("/bin/sh")
+	let cmd = b"/bin/sh";
+	Command::new(std::str::from_utf8(&cmd[..]).unwrap())
 		.stdin(pipeout_child)
 		.stderr(
 			pipein_child.try_clone().expect("Failed to dup stderr"),
@@ -138,6 +139,7 @@ pub fn main(
 		.stdout(pipein_child)
 		.spawn()
 		.expect("Unable to start shell.");
+	// todo!();
 
 	// Start up the relay
 	let mut node1 = RelayNode {
