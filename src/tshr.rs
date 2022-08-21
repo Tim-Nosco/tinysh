@@ -12,6 +12,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 #[allow(unused_imports)]
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
+use base64ct::{Base64, Encoding};
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
@@ -42,27 +43,13 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 // The ecdh library expects the PEM in a certain format
 //  use this function to convert from straight b64 to
 //  the expected format.
-fn format_public_key(b64_pem: &str) -> [u8; 1024] {
+fn format_public_key(b64_sec1: &str) -> ([u8; 1024], usize) {
 	let mut rebuilt = [0u8; 1024];
-	let mut filled = 0;
-	// Add the beginning
-	let start = b"-----BEGIN PUBLIC KEY-----\n";
-	rebuilt[0..start.len()].copy_from_slice(&start[..]);
-	filled += start.len();
-	// Add all the chars
-	for (idx, c) in b64_pem.as_bytes().iter().enumerate() {
-		rebuilt[filled] = *c;
-		filled += 1;
-		// add a newline after each 64 chars
-		if idx == 64 {
-			rebuilt[filled] = b'\n';
-			filled += 1;
-		}
-	}
-	// Add the end
-	let end = b"\n-----END PUBLIC KEY-----";
-	rebuilt[filled..filled + end.len()].copy_from_slice(&end[..]);
-	rebuilt
+	let size = {
+		let s = Base64::decode(b64_sec1, &mut rebuilt).unwrap();
+		s.len()
+	};
+	(rebuilt, size)
 }
 
 #[cfg_attr(not(test), no_mangle)]
@@ -94,21 +81,19 @@ pub fn main(
 		ip_str.parse().expect("Failed to parse IP");
 	// Parse the public key which should just be the base64 component
 	//  on a single line
-	let rebuilt = format_public_key(&key_str);
-	let rebuilt_str = std::str::from_utf8(&rebuilt).unwrap();
-	let pub_l = PublicKey::from_str(rebuilt_str)
+	let (rebuilt, rebuilt_sz) = format_public_key(&key_str);
+	let pub_l = PublicKey::from_sec1_bytes(&rebuilt[..rebuilt_sz])
 		.expect("Failed to parse public key");
 
 	debug!(
-		"Found local's key:\n{:#}\nAnd address: {:#}",
-		pub_l.to_string(),
-		ipaddr_l,
+		"Found local's key:\n{:?}\nAnd address: {:#}",
+		pub_l, ipaddr_l,
 	);
 
 	// Seed the RNG
 	// Prefer the auxiliary vector's random data entry for seeding
-	let rand_ptr = getauxval(envp, libc::AT_RANDOM as usize)
-		.unwrap_or(0) as *const u64;
+	let rand_ptr =
+		getauxval(envp, libc::AT_RANDOM as usize) as *const u64;
 	let seed1 = get_rand_seed(rand_ptr);
 
 	// TODO: Register SIGALRM
@@ -117,10 +102,10 @@ pub fn main(
 	let addr = SocketAddr::from((ipaddr_l, LOCAL_PORT));
 	let mut remote =
 		TcpStream::connect(addr).expect("Unable to connect.");
-
 	// Get the shared AES key
 	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
 		.expect("Failed KEX");
+	//todo!();
 
 	// Create a new rng for the challenge and nonce values
 	let mut rng = if let Some(seed2) =

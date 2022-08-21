@@ -3,9 +3,12 @@ mod kex;
 mod relay;
 pub mod util;
 
+use crate::util::debug;
 use anyhow::Result;
+use base64ct::{Base64, Encoding};
 use clap::{Parser, Subcommand};
 use kex::{play_auth_challenge_local, play_dh_kex_local};
+use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::SecretKey;
 use rand_core::OsRng;
 use std::fs::OpenOptions;
@@ -57,7 +60,9 @@ fn keygen(
 	};
 
 	// Print out the public key for use in the remote client
-	let pub_key = priv_key.public_key().to_string();
+	let pub_key = Base64::encode_string(
+		priv_key.public_key().to_encoded_point(true).as_bytes(),
+	);
 	// println!("Use the following string in the remote's argv. \
 	//    This is your public key:\n{}", pub_key
 	println!(
@@ -87,6 +92,7 @@ fn handle_client(
 	conn: &mut TcpStream,
 	secret_l: &SecretKey,
 ) -> Result<()> {
+	debug!("Got new connection.");
 	// Get the shared key
 	let key = play_dh_kex_local(conn, secret_l)?;
 	// Respond to the challenge
