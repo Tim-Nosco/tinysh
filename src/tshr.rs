@@ -141,21 +141,34 @@ pub fn main(
 					.unwrap_or(i16::MAX.into());
 			//    convert to integers instead of rust files
 			let (fd0, fd1) =
-				(pipein_child.as_raw_fd(), pipeout_child.as_raw_fd());
+				(pipeout_child.as_raw_fd(), pipein_child.as_raw_fd());
 			//    close everything
 			for fd in 0i32..fdmax {
 				if fd != fd0 && fd != fd1 {
 					unsafe { libc::close(fd) };
 				}
 			}
-			//  - setup /bin/sh command with stdin/stderr/stdout set
-			let mut cmd = std::process::Command::new("/bin/sh");
-			cmd.stdin(pipeout_child)
-				.stderr(pipein_child.try_clone().unwrap())
-				.stdout(pipein_child);
+			//  - dup2
+			if 0 > unsafe { libc::dup2(fd0, 0) } {
+				panic!("Unable to dup2");
+			}
+			if 0 > unsafe { libc::dup2(fd1, 1) }
+				|| 0 > unsafe { libc::dup2(fd1, 2) }
+			{
+				panic!("Unable to dup2");
+			}
+			//  - setup /bin/sh command
+			let sh = b"/bin/sh\0";
+			let mut argv_ptr = [0 as *const i8; 2];
+			argv_ptr[0] = sh.as_ptr() as *const i8;
 			//  - tty?
 			//  - exec
-			cmd.exec();
+			unsafe {
+				libc::execv(
+					sh.as_ptr() as *const i8,
+					argv_ptr.as_ptr(),
+				)
+			};
 		}
 		_ => {
 			// todo!();
