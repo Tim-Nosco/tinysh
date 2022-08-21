@@ -1,5 +1,3 @@
-use anyhow::{anyhow, Result};
-
 // Extract a key from the auxiliary vector starting the search from
 // the environment pointer
 pub fn getauxval(envp: *const *const u8, key: usize) -> usize {

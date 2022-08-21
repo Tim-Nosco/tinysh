@@ -5,10 +5,10 @@ use aes_gcm::{
 	aead::{heapless::Vec, AeadInPlace, KeyInit},
 	Aes256Gcm, Nonce,
 };
-use anyhow::{anyhow, Result};
 use rand_core::RngCore;
 use std::io::{Error, Read, Write};
 use std::os::unix::io::AsRawFd;
+use thiserror::Error;
 
 #[allow(unused_imports)]
 use crate::util::debug;
@@ -31,6 +31,16 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 	fn flush(&mut self) -> Result<(), Error> {
 		self.writeable.flush()
 	}
+}
+
+#[derive(Error, Debug)]
+pub enum IBError {
+	#[error("Error copying memory")]
+	Copy,
+	#[error("Error encrypting")]
+	Encrypt,
+	#[error("Error Decrypting")]
+	Decrypt,
 }
 
 // This is an internal buffer for storage of encrypted and decrypted
@@ -94,7 +104,7 @@ impl InternalBuf {
 		&mut self,
 		dst: &mut InternalBuf,
 		cipher: &mut Aes256Gcm,
-	) -> Result<()> {
+	) -> Result<(), IBError> {
 		// Make some space for decrypting
 		let mut working: Vec<u8, INTERNALBUF_MAX_SIZE> = Vec::new();
 		// while there's room to decrypt messages
@@ -113,11 +123,11 @@ impl InternalBuf {
 			let end = INTERNALBUF_META + decrypted_size;
 			working
 				.extend_from_slice(&self.buf[start..end])
-				.or(Err(anyhow!("Unable to copy onto stack.")))?;
+				.or(Err(IBError::Copy))?;
 			// Decrypt
 			cipher
 				.decrypt_in_place(nonce, b"", &mut working)
-				.or(Err(anyhow!("Unable to decrypt")))?;
+				.or(Err(IBError::Decrypt))?;
 			// Copy into dst
 			dst.extend(&working[..decrypted_size]);
 			// Cleanup
@@ -154,7 +164,7 @@ impl InternalBuf {
 		dst: &mut InternalBuf,
 		cipher: &mut Aes256Gcm,
 		rng: &mut R,
-	) -> Result<()>
+	) -> Result<(), IBError>
 	where
 		R: RngCore,
 	{
@@ -169,23 +179,25 @@ impl InternalBuf {
 			// Extract out the message we want to encrypt
 			let mut msg: Vec<u8, INTERNALBUF_MAX_SIZE> = Vec::new();
 			msg.extend_from_slice(&self.buf[0..max_msg_size])
-				.or(Err(anyhow!("Unable to copy to stack.")))?;
+				.or(Err(IBError::Copy))?;
 			// Discard the used content
 			self.clear(max_msg_size);
 			// Make a new nonce
 			let mut nonce_raw = [0u8; MSG_NONCE_FIELD];
-			rng.try_fill_bytes(&mut nonce_raw)?;
+			rng.try_fill_bytes(&mut nonce_raw)
+				.or(Err(IBError::Copy))?;
 			let nonce = Nonce::from_slice(&nonce_raw);
 			// Encrypt the message
 			cipher
 				.encrypt_in_place(nonce, b"", &mut msg)
-				.or(Err(anyhow!("Unable to encrypt.")))?;
+				.or(Err(IBError::Encrypt))?;
 			// Build the encrypted message onto self.buf:
 			//  |--size--|--nonce--|--ciphertext--|
 			//  size:
 			let total_size: MsgSize = (MSG_SIZE_FIELD
 				+ nonce.len() + msg.len())
-			.try_into()?;
+			.try_into()
+			.or(Err(IBError::Copy))?;
 			dst.extend(&total_size.to_be_bytes());
 			//  nonce:
 			dst.extend(&nonce);
@@ -205,6 +217,26 @@ impl Default for InternalBuf {
 	}
 }
 
+#[derive(Error, Debug)]
+pub enum RelayError {
+	#[error("Cipher")]
+	Cipher,
+	#[error("Cast")]
+	Cast,
+	#[error("Poll")]
+	Poll,
+	#[error("Read")]
+	Read,
+	#[error("Shutdown")]
+	Shutdown,
+	#[error("Write")]
+	Write,
+	#[error("Encrypt")]
+	Encrypt,
+	#[error("Decrypt")]
+	Decrypt,
+}
+
 // Encrypted relay between two nodes
 pub fn relay<A, B, C, R>(
 	// This can be stdin/stdout, pipes, etc.
@@ -216,7 +248,7 @@ pub fn relay<A, B, C, R>(
 	key: &[u8; 32],
 	// This rng is used to generate 12-byte nonces for each message
 	rng: &mut R,
-) -> Result<()>
+) -> Result<(), RelayError>
 where
 	A: Read + AsRawFd,
 	B: Write + AsRawFd,
@@ -244,7 +276,7 @@ where
 	fds[0b10].events |= libc::POLLIN;
 
 	// Create a buffer for each fds entry
-	let mut bufs = vec![
+	let mut bufs = [
 		InternalBuf::default(),
 		InternalBuf::default(),
 		InternalBuf::default(),
@@ -252,18 +284,22 @@ where
 	];
 
 	// Initialize a cipher for recv and sends on node1
-	let mut ciphers = vec![
-		Aes256Gcm::new_from_slice(key)?,
-		Aes256Gcm::new_from_slice(key)?,
+	let mut ciphers = [
+		Aes256Gcm::new_from_slice(key).or(Err(RelayError::Cipher))?,
+		Aes256Gcm::new_from_slice(key).or(Err(RelayError::Cipher))?,
 	];
 
 	loop {
 		// Do the poll
 		if unsafe {
-			libc::poll(fds.as_mut_ptr(), fds.len().try_into()?, -1)
+			libc::poll(
+				fds.as_mut_ptr(),
+				fds.len().try_into().or(Err(RelayError::Cast))?,
+				-1,
+			)
 		} < 0
 		{
-			Err(anyhow!("Error using poll."))?;
+			Err(RelayError::Poll)?;
 		}
 		// debug!("poll returns!");
 		// Go through each revent and respond to POLLIN or POLLOUT as
@@ -277,15 +313,18 @@ where
 				let max_recv = buf.remains(true);
 				let this_node: &mut (dyn Read) =
 					if 0 < (idx & 0b10) { node1 } else { node0 };
-				let read_amt = this_node.read(
-					&mut buf.buf[buf.filled..buf.filled + max_recv],
-				)?;
+				let read_amt = this_node
+					.read(
+						&mut buf.buf
+							[buf.filled..buf.filled + max_recv],
+					)
+					.or(Err(RelayError::Read))?;
 				// debug!("- read: {} bytes", read_amt);
 				if read_amt == 0 {
 					// We got POLLIN, but read 0 bytes.
 					// This is a polite way of conducting a socket
 					// shutdown.
-					Err(anyhow!("Node shutdown"))?;
+					Err(RelayError::Shutdown)?;
 				}
 				buf.filled += read_amt;
 				// debug!("- filled {}: {}", idx, buf.filled);
@@ -295,8 +334,12 @@ where
 				// debug!("POLLOUT on {}", idx);
 				let this_node: &mut (dyn Write) =
 					if 0 < (idx & 0b10) { node1 } else { node0 };
-				buf.clear(this_node.write(&buf.buf[0..buf.filled])?);
-				this_node.flush()?;
+				buf.clear(
+					this_node
+						.write(&buf.buf[0..buf.filled])
+						.or(Err(RelayError::Read))?,
+				);
+				this_node.flush().or(Err(RelayError::Write))?;
 			}
 		}
 
@@ -307,20 +350,24 @@ where
 			// node0.writeable  <- D(c) <- node1.readable
 			let src = 0b10;
 			let dst = 0b01;
-			part1[src & 1].decrypt_into(
-				&mut part0[dst & 1],
-				&mut ciphers[src >> 1],
-			)?;
+			part1[src & 1]
+				.decrypt_into(
+					&mut part0[dst & 1],
+					&mut ciphers[src >> 1],
+				)
+				.or(Err(RelayError::Decrypt))?;
 		}
 		{
 			// node0.readable   -> E(p) -> node1.writeable
 			let src = 0b00;
 			let dst = 0b11;
-			part0[src & 1].encrypt_into(
-				&mut part1[dst & 1],
-				&mut ciphers[src >> 1],
-				rng,
-			)?;
+			part0[src & 1]
+				.encrypt_into(
+					&mut part1[dst & 1],
+					&mut ciphers[src >> 1],
+					rng,
+				)
+				.or(Err(RelayError::Encrypt))?;
 		}
 
 		// Set POLLIN and POLLOUT

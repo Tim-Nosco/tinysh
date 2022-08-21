@@ -1,8 +1,8 @@
 #![allow(dead_code)]
 
 use crate::util::debug;
+#[allow(unused_imports)]
 use anyhow::anyhow;
-use base64ct::{Base64, Encoding};
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
 use p256::ecdsa::{
 	signature::{Signature, Signer, Verifier},
@@ -14,7 +14,6 @@ use rand_chacha::ChaCha20Rng;
 use rand_core::{CryptoRng, RngCore, SeedableRng};
 use sha2::Sha256;
 use std::io::{Read, Write};
-use std::str::FromStr;
 use thiserror::Error;
 
 #[derive(Error, Debug)]

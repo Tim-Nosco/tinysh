@@ -21,9 +21,6 @@ use relay::{relay, RelayNode};
 use std::ffi::{c_char, CStr};
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
-use std::os::unix::process::CommandExt;
-use std::process::Command;
-use std::str::FromStr;
 use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
@@ -171,7 +168,6 @@ pub fn main(
 			};
 		}
 		_ => {
-			// todo!();
 			// Start up the relay
 			let mut node1 = RelayNode {
 				readable: pipein_parent,
