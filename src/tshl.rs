@@ -16,6 +16,10 @@ use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 
+// termion bloats the client, but we don't care about the client's size too much.  If need be we
+// can eliminate termion and manually set the client's terminal into raw mode.
+use termion::raw::IntoRawMode;
+
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
 
@@ -100,9 +104,12 @@ fn handle_client(
 	// Setup the encrypted relay betwen STDIO and the socket
 	let mut local_node = RelayNode {
 		readable: std::io::stdin(),
-		writeable: std::io::stdout(),
+		writeable: std::io::stdout().into_raw_mode().unwrap(),
 	};
-	relay(&mut local_node, conn, &key, &mut OsRng)?;
+    match relay(&mut local_node, conn, &key, &mut OsRng) {
+        Ok(_) => {debug!("Client finished relay"); ()},
+        Err(e) => {debug!("Client error: {:?}", e); ()},
+    }
 
 	Ok(())
 }

@@ -18,9 +18,13 @@ use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
 use relay::{relay, RelayNode};
-use std::ffi::{c_char, CStr};
+use std::ffi::{c_char, c_int, CStr};
+use std::io;
+use std::mem::MaybeUninit;
 use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
+use std::os::unix::prelude::RawFd;
+use std::ptr;
 use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
@@ -49,6 +53,58 @@ fn format_public_key(b64_sec1: &str) -> ([u8; 1024], usize) {
 		s.len()
 	};
 	(rebuilt, size)
+}
+
+// This struct implementation duplicates nix's pty struct
+// implementation. It's a very thin layer around a RawFd, but makes
+// certain that you can read to and write from it.
+#[derive(Debug, Eq, Hash, PartialEq)]
+pub struct PtyMaster(RawFd);
+
+impl io::Read for PtyMaster {
+	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+		let res = unsafe {
+			libc::read(
+				self.0,
+				buf.as_mut_ptr() as *mut libc::c_void,
+				buf.len() as libc::size_t,
+			)
+		};
+
+		if res == -1 {
+			Err(io::Error::last_os_error())
+		} else {
+			Ok(res as usize)
+		}
+	}
+}
+
+impl io::Write for PtyMaster {
+	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+		let res = unsafe {
+			libc::write(
+				self.0,
+				buf.as_ptr() as *const libc::c_void,
+				buf.len() as libc::size_t,
+			)
+		};
+
+		if res == -1 {
+			Err(io::Error::last_os_error())
+		} else {
+			Ok(res as usize)
+		}
+	}
+
+	fn flush(&mut self) -> io::Result<()> {
+		Ok(())
+	}
+}
+
+impl AsRawFd for PtyMaster {
+	fn as_raw_fd(&self) -> RawFd {
+		self.0
+	}
 }
 
 #[cfg_attr(not(test), no_mangle)]
@@ -123,42 +179,57 @@ pub fn main(
 	// TODO: unregister SIGALRM
 
 	// Make some pipes
-	let (pipein_parent, pipein_child) =
-		os_pipe::pipe().expect("Failed to open pipes");
-	let (pipeout_child, pipeout_parent) =
-		os_pipe::pipe().expect("Failed to open pipes");
+	let mut master: c_int = 0;
+	let mut slave: c_int = 0;
+	if 0 > unsafe {
+		libc::openpty(
+			&mut master,
+			&mut slave,
+			ptr::null_mut(),
+			ptr::null(),
+			ptr::null(),
+		)
+	} {
+		panic!("Unable to openpty");
+	}
 	match unsafe { libc::fork() } {
 		-1 => panic!("Unable to fork"),
 		0 => {
 			// Child:
-			//  - close fds (except _child pipes) get the max fd value
+			//  - create a new session and set the controlling
+			//    terminal to be be the slave side of the pty. It's
+			//    probably more portable to open() the name of the pty
+			//    slave, since then we don't we have to mess around
+			//    with ioctls. opening a pty will make it the
+			//    controlling terminal.
+			if 0 > unsafe { libc::setsid() } {
+				panic!("Unable to setsid");
+			}
+			if 0 > unsafe { libc::ioctl(slave, libc::TIOCSCTTY) } {
+				panic!("Unable to ioctl TIOCSTTY");
+			}
+			//  - close fds (except the pty slave) get the max fd
+			//    value
 			let fdmax: i32 =
 				unsafe { libc::sysconf(libc::_SC_OPEN_MAX) }
 					.try_into()
 					.unwrap_or(i16::MAX.into());
-			//    convert to integers instead of rust files
-			let (fd0, fd1) =
-				(pipeout_child.as_raw_fd(), pipein_child.as_raw_fd());
 			//    close everything
 			for fd in 0i32..fdmax {
-				if fd != fd0 && fd != fd1 {
+				if fd != slave {
 					unsafe { libc::close(fd) };
 				}
 			}
 			//  - dup2
-			if 0 > unsafe { libc::dup2(fd0, 0) } {
-				panic!("Unable to dup2");
-			}
-			if 0 > unsafe { libc::dup2(fd1, 1) }
-				|| 0 > unsafe { libc::dup2(fd1, 2) }
-			{
-				panic!("Unable to dup2");
+			for fd in 0i32..3 {
+				if 0 > unsafe { libc::dup2(slave, fd) } {
+					panic!("Unable to dup2");
+				}
 			}
 			//  - setup /bin/sh command
 			let sh = b"/bin/sh\0";
 			let mut argv_ptr = [0 as *const i8; 2];
 			argv_ptr[0] = sh.as_ptr() as *const i8;
-			//  - tty?
 			//  - exec
 			unsafe {
 				libc::execv(
@@ -168,14 +239,51 @@ pub fn main(
 			};
 		}
 		_ => {
+			// Set up handler for SIGCHLD. If the child shell exits,
+			// gets stopped, etc., we want the remote to exit, thus
+			// closing the connection to the client.
+			unsafe {
+				let mut sigset: libc::sigset_t =
+					MaybeUninit::zeroed().assume_init();
+				libc::sigemptyset(&mut sigset);
+				let sigact = libc::sigaction {
+					sa_sigaction: exit_on_sigchld as usize,
+					sa_mask: sigset,
+					sa_flags: 0,
+					sa_restorer: None,
+				};
+				libc::sigaction(
+					libc::SIGCHLD,
+					&sigact,
+					ptr::null_mut(),
+				);
+			}
 			// Start up the relay
 			let mut node1 = RelayNode {
-				readable: pipein_parent,
-				writeable: pipeout_parent,
+				readable: PtyMaster(master),
+				writeable: PtyMaster(master),
 			};
-			relay(&mut node1, &mut remote, &key, &mut rng)
-				.expect("Finished relay");
+			match relay(&mut node1, &mut remote, &key, &mut rng) {
+				Ok(_) => {
+					debug!("Remote finished relay");
+					()
+				}
+				Err(e) => {
+					debug!("Remote error: {:?}", e);
+					()
+				}
+			}
 		}
 	};
 	return 0;
+}
+
+fn exit_on_sigchld(
+	_sig: c_int,
+	_info: &mut libc::siginfo_t,
+	_context: &mut libc::c_void,
+) {
+	unsafe {
+		libc::exit(0);
+	}
 }

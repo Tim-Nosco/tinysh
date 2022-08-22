@@ -16,6 +16,7 @@ lazy_static = "*"
 clap = { version = "*", features = ["derive"] }
 os_pipe = "*"
 base64ct = "*"
+termion = "*"
 
 [dev-dependencies]
 rand = { version = "*", features = ["small_rng"] }
