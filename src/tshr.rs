@@ -19,14 +19,12 @@ use relay::{relay, RelayNode};
 use std::ffi::{c_char, c_int, CStr};
 use std::io;
 use std::mem::MaybeUninit;
-use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::prelude::RawFd;
 use std::ptr;
 use thiserror::Error;
 use util::debug;
-
-const LOCAL_PORT: u16 = 2000;
 
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	if 0 != rand_ptr as usize {
@@ -212,7 +210,7 @@ fn main_wrapper(
 		.to_str()
 		.or(Err(RemoteError::Arguments))?;
 	// Parse the IP
-	let ipaddr_l: Ipv4Addr =
+	let addr_l: SocketAddr =
 		ip_str.parse().or(Err(RemoteError::ArgumentsIP))?;
 	// Parse the public key which should just be the base64 component
 	//  on a single line
@@ -227,7 +225,7 @@ fn main_wrapper(
 
 	debug!(
 		"Found local's key:\n{:?}\nAnd address: {:#}",
-		pub_l, ipaddr_l,
+		pub_l, addr_l,
 	);
 
 	// Seed the RNG
@@ -239,9 +237,8 @@ fn main_wrapper(
 	// TODO: Register SIGALRM
 
 	// Open the socket to remote
-	let addr = SocketAddr::from((ipaddr_l, LOCAL_PORT));
 	let mut remote =
-		TcpStream::connect(addr).or(Err(RemoteError::Connect))?;
+		TcpStream::connect(addr_l).or(Err(RemoteError::Connect))?;
 	// Get the shared AES key
 	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
 		.or(Err(RemoteError::KEX))?;
