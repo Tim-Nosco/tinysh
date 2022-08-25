@@ -9,8 +9,6 @@ pub mod util;
 
 #[allow(unused_imports)]
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-#[allow(unused_imports)]
-use anyhow::{anyhow, Result};
 use auxv::getauxval;
 use base64ct::{Base64, Encoding};
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
