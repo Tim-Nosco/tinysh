@@ -297,7 +297,7 @@ where
 				fds.len().try_into().or(Err(RelayError::Cast))?,
 				-1,
 			)
-		} < 0
+		} <= 0
 		{
 			Err(RelayError::Poll)?;
 		}
@@ -334,11 +334,10 @@ where
 				// debug!("POLLOUT on {}", idx);
 				let this_node: &mut (dyn Write) =
 					if 0 < (idx & 0b10) { node1 } else { node0 };
-				buf.clear(
-					this_node
-						.write(&buf.buf[0..buf.filled])
-						.or(Err(RelayError::Read))?,
-				);
+				let write_amt = this_node
+					.write(&buf.buf[0..buf.filled])
+					.or(Err(RelayError::Read))?;
+				buf.clear(write_amt);
 				this_node.flush().or(Err(RelayError::Write))?;
 			}
 		}
