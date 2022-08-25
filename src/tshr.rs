@@ -185,9 +185,11 @@ enum RemoteError {
 	#[error("Auth challenge")]
 	Challenge,
 	#[error("Unable to open PTY")]
-	PTY,
+	LibcPTY,
 	#[error("Unable to fork")]
-	Fork,
+	LibcFork,
+	#[error("libc error")]
+	Libc,
 }
 
 fn main_wrapper(
@@ -274,7 +276,7 @@ fn main_wrapper(
 		panic!("Unable to unlockpt");
 	}
 	match unsafe { libc::fork() } {
-		-1 => return Err(RemoteError::Fork),
+		-1 => return Err(RemoteError::LibcFork),
 		0 => {
 			// Child:
 			//  - create a new session and set the controlling
@@ -297,11 +299,11 @@ fn main_wrapper(
 			};
 			// Establish this pid as the process tree root
 			if 0 > unsafe { libc::setsid() } {
-				panic!("Unable to setsid");
+				return Err(RemoteError::Libc);
 			}
 			// Set the slave as the controlling terminal to this pid
 			if 0 > unsafe { libc::ioctl(slave, libc::TIOCSCTTY) } {
-				panic!("Unable to ioctl TIOCSTTY");
+				return Err(RemoteError::Libc);
 			}
 			//  - close fds (except the pty slave) get the max fd
 			//    value
@@ -318,7 +320,7 @@ fn main_wrapper(
 			//  - dup2
 			for fd in 0i32..3 {
 				if 0 > unsafe { libc::dup2(slave, fd) } {
-					panic!("Unable to dup2");
+					return Err(RemoteError::Libc);
 				}
 			}
 			//  - setup /bin/sh command
