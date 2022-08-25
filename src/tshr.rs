@@ -1,7 +1,5 @@
 #![cfg_attr(not(test), no_main)]
-#![feature(trait_alias)]
-#![feature(int_roundings)]
-#![feature(int_log)]
+#![feature(trait_alias, int_log, int_roundings)]
 
 extern crate libc;
 mod auxv;
