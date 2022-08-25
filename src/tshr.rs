@@ -1,5 +1,5 @@
 #![cfg_attr(not(test), no_main)]
-#![feature(trait_alias)]
+#![feature(trait_alias, int_log, int_roundings)]
 
 extern crate libc;
 mod auxv;
@@ -105,6 +105,50 @@ impl AsRawFd for PtyMaster {
 	fn as_raw_fd(&self) -> RawFd {
 		self.0
 	}
+}
+
+// This crazy hack is because snprintf is used in libc::openpty
+//  and that results in a whole mess of printf deps
+#[cfg(not(assert_debug))]
+#[no_mangle]
+pub fn snprintf(
+	dst: *mut u8,
+	size: usize,
+	fmt: *const c_char,
+	i: i32,
+) -> i32 {
+	// TODO: avoid panic with return
+	// Read in the fmt cstr
+	let fmt_str = unsafe { CStr::from_ptr(fmt) }.to_str().unwrap();
+	// Only do these shenanigans if it's the aforementioned call
+	assert_eq!(fmt_str, "/dev/pts/%d");
+	// Reconstitute the dst array
+	let dst_arr =
+		unsafe { std::slice::from_raw_parts_mut(dst, size) };
+	// Write in the /dev/pts/ part
+	let mut written = size.min(fmt_str.len() - 2);
+	dst_arr[0..written]
+		.copy_from_slice(fmt_str[..written].as_bytes());
+	// Determine how many digits it's going to take
+	let digits = (i.ilog10() + 1) as usize;
+	// Determine how much of that we can print
+	let remaining = size.saturating_sub(written);
+	let mut cur = i;
+	// Go through, most significant to least
+	for idx in (digits.saturating_sub(remaining)..digits).rev() {
+		// Divide out the highest position
+		let denominator = 10i32.pow(idx as u32);
+		let ms_digit = cur.div_floor(denominator);
+		cur = cur % denominator;
+		// Write it to the dst
+		dst_arr[written] = (0x30 + ms_digit).try_into().unwrap();
+		written += 1;
+	}
+	// Finish it with a null terminator
+	if written < size {
+		dst_arr[written] = 0;
+	}
+	written.try_into().unwrap()
 }
 
 #[cfg_attr(not(test), no_mangle)]
