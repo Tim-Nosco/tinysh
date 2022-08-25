@@ -9,8 +9,6 @@ pub mod util;
 
 #[allow(unused_imports)]
 use aes_gcm::{Aes256Gcm, Key, Nonce};
-#[allow(unused_imports)]
-use anyhow::{anyhow, Result};
 use auxv::getauxval;
 use base64ct::{Base64, Encoding};
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
@@ -25,6 +23,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::prelude::RawFd;
 use std::ptr;
+use thiserror::Error;
 use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
@@ -107,21 +106,29 @@ impl AsRawFd for PtyMaster {
 	}
 }
 
-// This crazy hack is because snprintf is used in libc::openpty
-//  and that results in a whole mess of printf deps
-#[cfg(not(assert_debug))]
-#[no_mangle]
-pub fn snprintf(
+// Use this error to wrap the snprintf potential problems
+#[derive(Error, Debug)]
+enum PrintfError {
+	#[error("Unable to cast to desired type.")]
+	Cast,
+	#[error("Unexpected format string.")]
+	Unimplemented,
+}
+// Result wrapper function for snprintf implementation
+fn pty_snprintf(
 	dst: *mut u8,
 	size: usize,
 	fmt: *const c_char,
 	i: i32,
-) -> i32 {
-	// TODO: avoid panic with return
+) -> Result<i32, PrintfError> {
 	// Read in the fmt cstr
-	let fmt_str = unsafe { CStr::from_ptr(fmt) }.to_str().unwrap();
+	let fmt_str = unsafe { CStr::from_ptr(fmt) }
+		.to_str()
+		.or(Err(PrintfError::Cast))?;
 	// Only do these shenanigans if it's the aforementioned call
-	assert_eq!(fmt_str, "/dev/pts/%d");
+	if fmt_str != "/dev/pts/%d" {
+		return Err(PrintfError::Unimplemented);
+	}
 	// Reconstitute the dst array
 	let dst_arr =
 		unsafe { std::slice::from_raw_parts_mut(dst, size) };
@@ -141,14 +148,28 @@ pub fn snprintf(
 		let ms_digit = cur.div_floor(denominator);
 		cur = cur % denominator;
 		// Write it to the dst
-		dst_arr[written] = (0x30 + ms_digit).try_into().unwrap();
+		dst_arr[written] = (0x30 + ms_digit)
+			.try_into()
+			.or(Err(PrintfError::Cast))?;
 		written += 1;
 	}
 	// Finish it with a null terminator
 	if written < size {
 		dst_arr[written] = 0;
 	}
-	written.try_into().unwrap()
+	written.try_into().or(Err(PrintfError::Cast))
+}
+// This crazy hack is because snprintf is used in libc::openpty
+//  and that results in a whole mess of printf deps
+#[cfg(not(assert_debug))]
+#[no_mangle]
+pub fn snprintf(
+	dst: *mut u8,
+	size: usize,
+	fmt: *const c_char,
+	i: i32,
+) -> i32 {
+	pty_snprintf(dst, size, fmt, i).unwrap_or(-1)
 }
 
 #[cfg_attr(not(test), no_mangle)]
