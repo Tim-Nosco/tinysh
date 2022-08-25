@@ -18,16 +18,16 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum KexError {
-	#[error("play_dh_kex error")]
-	KeyDecode,
-	#[error("write error")]
+	#[error("Unable to write")]
 	Write,
-	#[error("read error")]
+	#[error("Unable to read")]
 	Read,
-	#[error("challenge error")]
+	#[error("Failed challenge")]
 	Challenge,
-	#[error("calc shared secret")]
+	#[error("Unable to calculate shared secret")]
 	CalcSharedSecret,
+	#[error("Error copying data.")]
+	Copy,
 }
 
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {

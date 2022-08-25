@@ -219,21 +219,21 @@ impl Default for InternalBuf {
 
 #[derive(Error, Debug)]
 pub enum RelayError {
-	#[error("Cipher")]
+	#[error("Unable to create new cipher")]
 	Cipher,
-	#[error("Cast")]
+	#[error("Unable to cast between types")]
 	Cast,
-	#[error("Poll")]
+	#[error("Poll errored")]
 	Poll,
-	#[error("Read")]
+	#[error("Reading from fd failed")]
 	Read,
-	#[error("Shutdown")]
+	#[error("Remote sent the shutdown hint")]
 	Shutdown,
-	#[error("Write")]
+	#[error("Writing to fd failed")]
 	Write,
-	#[error("Encrypt")]
+	#[error("Unable to encrypt buffer")]
 	Encrypt,
-	#[error("Decrypt")]
+	#[error("Invalid data in buffer to decrypt")]
 	Decrypt,
 }
 
