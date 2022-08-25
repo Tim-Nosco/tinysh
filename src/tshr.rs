@@ -228,12 +228,12 @@ pub fn main(
 			}
 			//  - setup /bin/sh command
 			let sh = b"/bin/sh\0";
-			let mut argv_ptr = [0 as *const i8; 2];
-			argv_ptr[0] = sh.as_ptr() as *const i8;
+			let mut argv_ptr = [0 as *const c_char; 2];
+			argv_ptr[0] = sh.as_ptr() as *const c_char;
 			//  - exec
 			unsafe {
 				libc::execv(
-					sh.as_ptr() as *const i8,
+					sh.as_ptr() as *const c_char,
 					argv_ptr.as_ptr(),
 				)
 			};
