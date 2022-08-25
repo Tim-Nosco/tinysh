@@ -35,11 +35,11 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 
 #[derive(Error, Debug)]
 pub enum IBError {
-	#[error("Error copying memory")]
+	#[error("Unable to copy memory to/from an InternalBuffer")]
 	Copy,
-	#[error("Error encrypting")]
+	#[error("Unable to encrypt the InternalBuffer contents")]
 	Encrypt,
-	#[error("Error Decrypting")]
+	#[error("Unable to decrypt the InternalBuffer contents")]
 	Decrypt,
 }
 
