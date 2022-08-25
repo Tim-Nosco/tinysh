@@ -11,7 +11,7 @@ use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 
 #[allow(unused_imports)]
-use crate::util::debug;
+use crate::util::{copy_from_slice, debug};
 
 // Use this struct to act like a socket with read and write calls
 pub struct RelayNode<R, W> {
@@ -71,9 +71,11 @@ impl InternalBuf {
 		// self.buf[0..filled-amount]
 		if amount < self.filled {
 			let mut tmp = [0u8; INTERNALBUF_MAX_SIZE];
-			tmp[0..self.filled - amount]
-				.copy_from_slice(&self.buf[amount..self.filled]);
-			self.buf[..].copy_from_slice(&tmp[..]);
+			let _ = copy_from_slice(
+				&mut tmp[0..self.filled - amount],
+				&self.buf[amount..self.filled],
+			);
+			let _ = copy_from_slice(&mut self.buf[..], &tmp[..]);
 		}
 		// Update the remaining data count
 		self.filled = self.filled.saturating_sub(amount);
@@ -139,8 +141,10 @@ impl InternalBuf {
 	// Add a msg to the unfilled part of the buffer if there's room
 	//  otherwise, panic
 	fn extend(&mut self, msg: &[u8]) {
-		self.buf[self.filled..self.filled + msg.len()]
-			.copy_from_slice(&msg);
+		let _ = copy_from_slice(
+			&mut self.buf[self.filled..self.filled + msg.len()],
+			&msg,
+		);
 		self.filled += msg.len();
 	}
 	// Query how much space is left for new data
