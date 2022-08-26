@@ -7,15 +7,10 @@ mod kex;
 mod relay;
 pub mod util;
 
-#[allow(unused_imports)]
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use auxv::getauxval;
 use base64ct::{Base64, Encoding};
-use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-use relay::{relay, RelayNode};
 use std::ffi::{c_char, c_int, CStr};
 use std::io;
 use std::mem::MaybeUninit;
@@ -25,6 +20,11 @@ use std::os::unix::prelude::RawFd;
 use std::ptr;
 use thiserror::Error;
 use util::debug;
+
+use auxv::getauxval;
+#[allow(unused_imports)]
+use kex::{play_auth_challenge_remote, play_dh_kex_remote};
+use relay::{relay, RelayNode};
 
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	if 0 != rand_ptr as usize {
@@ -181,6 +181,7 @@ enum RemoteError {
 	#[error("Failed key exchange")]
 	KEX,
 	#[error("Auth challenge")]
+	#[allow(dead_code)]
 	Challenge,
 	#[error("Unable to open PTY")]
 	LibcPTY,
@@ -254,6 +255,7 @@ fn main_wrapper(
 	};
 
 	// Challenge the remote
+	#[cfg(feature = "challenge")]
 	play_auth_challenge_remote(&mut remote, &pub_l, &mut rng)
 		.or(Err(RemoteError::Challenge))?;
 
