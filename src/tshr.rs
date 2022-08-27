@@ -13,7 +13,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
 use base64ct::{Base64, Encoding};
-//use itoa;
+use itoa;
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
@@ -108,6 +108,45 @@ impl AsRawFd for PtyMaster {
 	}
 }
 
+// This function is supposed to mimic the real ptsname_r function
+// without using any formatting functions. Most of the work is moving
+// bytes around without creating any allocations.
+fn no_printf_ptsname_r(
+	fd: c_int,
+	buf: *mut c_char,
+	buflen: libc::size_t,
+) -> c_int {
+	let path = b"/dev/pts/\0";
+	let pathlen = path.len() - 1; // not counting the null byte
+	if pathlen > buflen {
+		return -1;
+	}
+	let path = CStr::from_bytes_with_nul(path).unwrap();
+	unsafe { path.as_ptr().copy_to(buf, pathlen) };
+
+	let ptsnum: c_int =
+		unsafe { MaybeUninit::zeroed().assume_init() };
+	if 0 != unsafe { libc::ioctl(fd, libc::TIOCGPTN, &ptsnum) } {
+		return -1;
+	}
+
+	let mut ptsbuf = itoa::Buffer::new();
+	let ptsstr = ptsbuf.format(ptsnum);
+	let ptsstrlen = ptsstr.len();
+	let ptsstr = unsafe {
+		CStr::from_bytes_with_nul_unchecked(ptsstr.as_bytes())
+	};
+
+	if pathlen + ptsstrlen > buflen {
+		return -1;
+	}
+	unsafe {
+		ptsstr.as_ptr().copy_to(buf.add(pathlen), ptsstrlen);
+		*buf.add(pathlen + ptsstrlen) = '\0' as c_char;
+	}
+	0
+}
+
 #[cfg_attr(not(test), no_mangle)]
 pub fn main(
 	argc: i32,
@@ -188,9 +227,7 @@ pub fn main(
 		0 => {
 			let mut slave_name: [c_char; 64] =
 				unsafe { MaybeUninit::zeroed().assume_init() };
-			unsafe {
-				libc::ptsname_r(master, slave_name.as_mut_ptr(), 64)
-			};
+			no_printf_ptsname_r(master, slave_name.as_mut_ptr(), 64);
 			let slave = unsafe {
 				libc::open(slave_name.as_ptr(), libc::O_RDWR)
 			};
