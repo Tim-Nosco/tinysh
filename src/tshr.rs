@@ -13,6 +13,7 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
 use base64ct::{Base64, Encoding};
+//use itoa;
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
@@ -172,23 +173,27 @@ pub fn main(
 
 	// TODO: unregister SIGALRM
 
-	// Make some pipes
-	let mut master: c_int = 0;
-	let mut slave: c_int = 0;
-	if 0 > unsafe {
-		libc::openpty(
-			&mut master,
-			&mut slave,
-			ptr::null_mut(),
-			ptr::null(),
-			ptr::null(),
-		)
-	} {
-		panic!("Unable to openpty");
+	let master = unsafe { libc::posix_openpt(libc::O_RDWR) };
+	if master < 0 {
+		panic!("Unable to posix_openpt");
+	}
+	if 0 > unsafe { libc::grantpt(master) } {
+		panic!("Unable to grantpt");
+	}
+	if 0 > unsafe { libc::unlockpt(master) } {
+		panic!("Unable to unlockpt");
 	}
 	match unsafe { libc::fork() } {
 		-1 => panic!("Unable to fork"),
 		0 => {
+			let mut slave_name: [c_char; 64] =
+				unsafe { MaybeUninit::zeroed().assume_init() };
+			unsafe {
+				libc::ptsname_r(master, slave_name.as_mut_ptr(), 64)
+			};
+			let slave = unsafe {
+				libc::open(slave_name.as_ptr(), libc::O_RDWR)
+			};
 			// Child:
 			//  - create a new session and set the controlling
 			//    terminal to be be the slave side of the pty. It's
