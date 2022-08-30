@@ -3,6 +3,7 @@
 # we can support.
 set -euo pipefail
 
+# Map the rust target triple we support to the musl version of the triple.
 # Note that each rust target we specify must also be listed in the
 # rust-toolchain.toml file, under 'targets'
 declare -A rust2musl
@@ -16,11 +17,12 @@ rust2musl[mipsel-unknown-linux-musl]=mipsel-linux-musl
 rust2musl[x86_64-unknown-linux-musl]=x86_64-linux-musl
 
 for rust_target in "${!rust2musl[@]}"; do
-    directory="${rust2musl[$rust_target]}-cross"
-    tarball="$directory.tgz"
+    musltriple="${rust2musl[$rust_target]}"
+    sysrootdir="$musltriple-cross"
+    tarball="$sysrootdir.tgz"
     url="https://musl.cc/$tarball"
 
-    if [ ! -d "$directory" ]; then
+    if [ ! -d "$sysrootdir" ]; then
         if [ ! -f "$tarball" ]; then
             wget -q "$url" && tar xzf "$tarball"
         else
@@ -28,13 +30,15 @@ for rust_target in "${!rust2musl[@]}"; do
         fi
     fi
 
-    compiler="${rust2musl[$rust_target]}-gcc"
+    compiler="$musltriple-gcc"
     export RUSTFLAGS="-Ctarget-feature=+crt-static"
     echo "[+] compiling $rust_target"
     cargo build \
-        --config "target.$rust_target.linker=\"$directory/bin/$compiler\"" \
+        --config "target.$rust_target.linker=\"$sysrootdir/bin/$compiler\"" \
         --target "$rust_target" \
         --bin tshr \
+        -Zbuild-std=std,core,alloc,panic_abort \
+        -Zbuild-std-features=panic_immediate_abort \
         --release -q
 
     du -h "./target/$rust_target/release/tshr"
