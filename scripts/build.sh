@@ -1,7 +1,14 @@
 #!/bin/bash
 
-ARCH=mipsel
-LIBC=musl
+if [ -z "${ARCH}" ]
+then
+    ARCH=mipsel
+fi
+if [ -z "${LIBC}" ]
+then
+    LIBC=musl
+fi
+
 TOOLCHAIN=${ARCH}-linux-${LIBC}-cross
 TRIPLE=${ARCH}-unknown-linux-${LIBC}
 

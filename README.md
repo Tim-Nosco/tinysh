@@ -33,25 +33,55 @@ Then, it calls the remote's `/bin/sh`, piping `STDIO` over the relay.
 
 ## Building
 
-### Dependencies
-
 You can use `docker` to build TSH by running: 
 
 `./scripts/docker.sh`
 
 and then
 
-`./scripts/build.sh`
+`ARCH='x86_64' LIBC='musl' ./scripts/build.sh`
 
 Ensure to change the `ARCH` and `LIBC` variables to match your desired build from the table above.
+
+If you don't have docker, you'll need [rustup](https://rustup.rs/). 
+After you have that, you should be able to use the build script above.
 
 ### Building for all arches
 
 To do this, use the helper script `scripts/build_all.sh`
 
-### Building for a specific arch
+### Building for development
+
+As demonstrated in `scripts/run_debug.sh`, you can do the following to run the local side:
+
+```
+# build a new key
+cargo run --bin tshl $ARCH -- key-gen -o key.priv
+
+# start the local client
+cargo run --bin tshl $ARCH -- listen -k key.priv -a "127.0.0.1:2000"
+```
+
+Then, in a new terminal, you can start the remote side:
+
+```
+# start the remote client
+cargo run --bin tshr $ARCH -- "127.0.0.1:2000" ${KEY}
+```
+
+## Other Notes
+
+The remote client is designed to be a single-use connection. 
+It calls home, decides what to do, does the thing, and then exits.
+It's worth while to consider running it in a loop to call home multiple times if desired.
 
 ## Future Features
+
+1. More unit tests
+1. Fuzzing
+1. GitHub CI to build releases automatically
+1. Get/Put/Execute
+1. Socks proxy
 
 ## References
 
