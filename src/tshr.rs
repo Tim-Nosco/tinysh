@@ -115,20 +115,22 @@ impl AsRawFd for PtyMaster {
 enum PTYNameError {
 	#[error("Unable to cast to desired type.")]
 	Cast,
+	#[error(
+		"The pty number's ascii representation was too big for our \
+		 buffer."
+	)]
+	NumTooBig,
 	#[error("Unable to ioctl the PTY number.")]
 	TIOCGPTN,
 }
 
 // Special purpose snprintf for determining the PTY name
 fn pty_snprintf(
-	dst: *mut u8,
-	size: usize,
-	i: i32,
-) -> Result<i32, PTYNameError> {
+	dst_arr: &mut [u8],
+	i: u32,
+) -> Result<usize, PTYNameError> {
 	let fmt_str = "/dev/pts/%d";
-	// Reconstitute the dst array
-	let dst_arr =
-		unsafe { std::slice::from_raw_parts_mut(dst, size) };
+	let size = dst_arr.len();
 	// Write in the /dev/pts/ part
 	let mut written = size.min(fmt_str.len() - 2);
 	dst_arr[0..written]
@@ -141,7 +143,7 @@ fn pty_snprintf(
 	// Go through, most significant to least
 	for idx in (digits.saturating_sub(remaining)..digits).rev() {
 		// Create the base-10 mask for the current position
-		let denominator = 10i32.pow(idx as u32);
+		let denominator = 10u32.pow(idx as u32);
 		// Divide out the highest position
 		let ms_digit = cur.div_floor(denominator);
 		// Update cur to no longer have the current position
@@ -165,16 +167,22 @@ fn pty_snprintf(
 // bytes around without creating any allocations.
 fn no_printf_ptsname_r(
 	fd: c_int,
-	buf: *mut c_char,
-	buflen: libc::size_t,
+	name_buf: &mut [u8],
 ) -> Result<(), PTYNameError> {
 	let ptsnum: c_int =
 		unsafe { MaybeUninit::zeroed().assume_init() };
 	if 0 != unsafe { libc::ioctl(fd, libc::TIOCGPTN, &ptsnum) } {
 		return Err(PTYNameError::TIOCGPTN);
 	}
-	let name_buf: [c_char; 30] = Default::default();
-	todo!()
+	let ascii_size = pty_snprintf(
+		name_buf,
+		ptsnum.try_into().or(Err(PTYNameError::Cast))?,
+	)?;
+	if ascii_size >= name_buf.len() {
+		Err(PTYNameError::NumTooBig)
+	} else {
+		Ok(())
+	}
 }
 
 #[cfg_attr(not(test), no_mangle)]
@@ -265,12 +273,16 @@ pub fn main(
 			//    with ioctls. opening a pty will make it the
 			//    controlling terminal.
 			// Determine the slave psudoterminal name
-			let mut slave_name: [c_char; 64] =
+			let mut slave_name: [u8; 64] =
 				unsafe { MaybeUninit::zeroed().assume_init() };
-			no_printf_ptsname_r(master, slave_name.as_mut_ptr(), 64);
+			no_printf_ptsname_r(master, &mut slave_name)
+				.expect("Unable to generate pty name.");
 			// Open it
 			let slave = unsafe {
-				libc::open(slave_name.as_ptr(), libc::O_RDWR)
+				libc::open(
+					slave_name.as_ptr() as *const c_char,
+					libc::O_RDWR,
+				)
 			};
 			// Establish this pid as the process tree root
 			if 0 > unsafe { libc::setsid() } {
@@ -314,21 +326,28 @@ pub fn main(
 			// Set up handler for SIGCHLD. If the child shell exits,
 			// gets stopped, etc., we want the remote to exit, thus
 			// closing the connection to the client.
-			unsafe {
+			// Create the action
+			let sigact = unsafe {
 				let mut sigset: libc::sigset_t =
 					MaybeUninit::zeroed().assume_init();
 				libc::sigemptyset(&mut sigset);
-				let sigact = libc::sigaction {
+				libc::sigaction {
 					sa_sigaction: exit_on_sigchld as usize,
 					sa_mask: sigset,
 					sa_flags: 0,
 					sa_restorer: None,
-				};
-				libc::sigaction(
-					libc::SIGCHLD,
-					&sigact,
-					ptr::null_mut(),
-				);
+				}
+			};
+			// Register the action
+			if -1
+				== unsafe {
+					libc::sigaction(
+						libc::SIGCHLD,
+						&sigact,
+						ptr::null_mut(),
+					)
+				} {
+				panic!("Unable to register SIGCHLD");
 			}
 			// Start up the relay
 			let mut node1 = RelayNode {
