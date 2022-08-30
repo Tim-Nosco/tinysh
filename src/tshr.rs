@@ -1,5 +1,7 @@
 #![cfg_attr(not(test), no_main)]
 #![feature(trait_alias)]
+#![feature(int_roundings)]
+#![feature(int_log)]
 
 extern crate libc;
 mod auxv;
@@ -13,7 +15,6 @@ use aes_gcm::{Aes256Gcm, Key, Nonce};
 use anyhow::{anyhow, Result};
 use auxv::getauxval;
 use base64ct::{Base64, Encoding};
-use itoa;
 use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
@@ -26,6 +27,7 @@ use std::net::{Ipv4Addr, SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::prelude::RawFd;
 use std::ptr;
+use thiserror::Error;
 use util::debug;
 
 const LOCAL_PORT: u16 = 2000;
@@ -108,43 +110,79 @@ impl AsRawFd for PtyMaster {
 	}
 }
 
+// Use this error to wrap the snprintf potential problems
+#[derive(Error, Debug)]
+enum PTYNameError {
+	#[error("Unable to cast to desired type.")]
+	Cast,
+	#[error(
+		"The pty number's ascii representation was too big for our \
+		 buffer."
+	)]
+	NumTooBig,
+	#[error("Unable to ioctl the PTY number.")]
+	TIOCGPTN,
+}
+
+// Special purpose snprintf for determining the PTY name
+fn pty_snprintf(
+	dst_arr: &mut [u8],
+	i: u32,
+) -> Result<usize, PTYNameError> {
+	let fmt_str = "/dev/pts/%d";
+	let size = dst_arr.len();
+	// Write in the /dev/pts/ part
+	let mut written = size.min(fmt_str.len() - 2);
+	dst_arr[0..written]
+		.copy_from_slice(fmt_str[..written].as_bytes());
+	// Determine how many digits it's going to take
+	let digits = (i.ilog10() + 1) as usize;
+	// Determine how much of that we can print
+	let remaining = size.saturating_sub(written);
+	let mut cur = i;
+	// Go through, most significant to least
+	for idx in (digits.saturating_sub(remaining)..digits).rev() {
+		// Create the base-10 mask for the current position
+		let denominator = 10u32.pow(idx as u32);
+		// Divide out the highest position
+		let ms_digit = cur.div_floor(denominator);
+		// Update cur to no longer have the current position
+		cur = cur % denominator;
+		// Write it to the dst in ascii ('0' = 0x30)
+		dst_arr[written] = (0x30 + ms_digit)
+			.try_into()
+			.or(Err(PTYNameError::Cast))?;
+		written += 1;
+	}
+	// Finish it with a null terminator
+	if written < size {
+		dst_arr[written] = 0;
+	}
+	// Return how many bytes were filled
+	written.try_into().or(Err(PTYNameError::Cast))
+}
+
 // This function is supposed to mimic the real ptsname_r function
 // without using any formatting functions. Most of the work is moving
 // bytes around without creating any allocations.
 fn no_printf_ptsname_r(
 	fd: c_int,
-	buf: *mut c_char,
-	buflen: libc::size_t,
-) -> c_int {
-	let path = b"/dev/pts/\0";
-	let pathlen = path.len() - 1; // not counting the null byte
-	if pathlen > buflen {
-		return -1;
-	}
-	let path = CStr::from_bytes_with_nul(path).unwrap();
-	unsafe { path.as_ptr().copy_to(buf, pathlen) };
-
+	name_buf: &mut [u8],
+) -> Result<(), PTYNameError> {
 	let ptsnum: c_int =
 		unsafe { MaybeUninit::zeroed().assume_init() };
 	if 0 != unsafe { libc::ioctl(fd, libc::TIOCGPTN, &ptsnum) } {
-		return -1;
+		return Err(PTYNameError::TIOCGPTN);
 	}
-
-	let mut ptsbuf = itoa::Buffer::new();
-	let ptsstr = ptsbuf.format(ptsnum);
-	let ptsstrlen = ptsstr.len();
-	let ptsstr = unsafe {
-		CStr::from_bytes_with_nul_unchecked(ptsstr.as_bytes())
-	};
-
-	if pathlen + ptsstrlen > buflen {
-		return -1;
+	let ascii_size = pty_snprintf(
+		name_buf,
+		ptsnum.try_into().or(Err(PTYNameError::Cast))?,
+	)?;
+	if ascii_size >= name_buf.len() {
+		Err(PTYNameError::NumTooBig)
+	} else {
+		Ok(())
 	}
-	unsafe {
-		ptsstr.as_ptr().copy_to(buf.add(pathlen), ptsstrlen);
-		*buf.add(pathlen + ptsstrlen) = '\0' as c_char;
-	}
-	0
 }
 
 #[cfg_attr(not(test), no_mangle)]
@@ -194,7 +232,6 @@ pub fn main(
 	// Get the shared AES key
 	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
 		.expect("Failed KEX");
-	//todo!();
 
 	// Create a new rng for the challenge and nonce values
 	let mut rng = if let Some(seed2) =
@@ -212,25 +249,22 @@ pub fn main(
 
 	// TODO: unregister SIGALRM
 
+	// Get a master pseudoterminal file descriptor
 	let master = unsafe { libc::posix_openpt(libc::O_RDWR) };
 	if master < 0 {
 		panic!("Unable to posix_openpt");
 	}
+	// Register a slave pseudoterminal to this master
 	if 0 > unsafe { libc::grantpt(master) } {
 		panic!("Unable to grantpt");
 	}
+	// Unlock the previously registered slave, allowing us to open it
 	if 0 > unsafe { libc::unlockpt(master) } {
 		panic!("Unable to unlockpt");
 	}
 	match unsafe { libc::fork() } {
 		-1 => panic!("Unable to fork"),
 		0 => {
-			let mut slave_name: [c_char; 64] =
-				unsafe { MaybeUninit::zeroed().assume_init() };
-			no_printf_ptsname_r(master, slave_name.as_mut_ptr(), 64);
-			let slave = unsafe {
-				libc::open(slave_name.as_ptr(), libc::O_RDWR)
-			};
 			// Child:
 			//  - create a new session and set the controlling
 			//    terminal to be be the slave side of the pty. It's
@@ -238,9 +272,23 @@ pub fn main(
 			//    slave, since then we don't we have to mess around
 			//    with ioctls. opening a pty will make it the
 			//    controlling terminal.
+			// Determine the slave psudoterminal name
+			let mut slave_name: [u8; 64] =
+				unsafe { MaybeUninit::zeroed().assume_init() };
+			no_printf_ptsname_r(master, &mut slave_name)
+				.expect("Unable to generate pty name.");
+			// Open it
+			let slave = unsafe {
+				libc::open(
+					slave_name.as_ptr() as *const c_char,
+					libc::O_RDWR,
+				)
+			};
+			// Establish this pid as the process tree root
 			if 0 > unsafe { libc::setsid() } {
 				panic!("Unable to setsid");
 			}
+			// Set the slave as the controlling terminal to this pid
 			if 0 > unsafe { libc::ioctl(slave, libc::TIOCSCTTY) } {
 				panic!("Unable to ioctl TIOCSTTY");
 			}
@@ -278,21 +326,28 @@ pub fn main(
 			// Set up handler for SIGCHLD. If the child shell exits,
 			// gets stopped, etc., we want the remote to exit, thus
 			// closing the connection to the client.
-			unsafe {
+			// Create the action
+			let sigact = unsafe {
 				let mut sigset: libc::sigset_t =
 					MaybeUninit::zeroed().assume_init();
 				libc::sigemptyset(&mut sigset);
-				let sigact = libc::sigaction {
+				libc::sigaction {
 					sa_sigaction: exit_on_sigchld as usize,
 					sa_mask: sigset,
 					sa_flags: 0,
 					sa_restorer: None,
-				};
-				libc::sigaction(
-					libc::SIGCHLD,
-					&sigact,
-					ptr::null_mut(),
-				);
+				}
+			};
+			// Register the action
+			if -1
+				== unsafe {
+					libc::sigaction(
+						libc::SIGCHLD,
+						&sigact,
+						ptr::null_mut(),
+					)
+				} {
+				panic!("Unable to register SIGCHLD");
 			}
 			// Start up the relay
 			let mut node1 = RelayNode {

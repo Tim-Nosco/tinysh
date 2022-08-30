@@ -17,7 +17,6 @@ clap = { version = "*", features = ["derive"] }
 os_pipe = "*"
 base64ct = "*"
 termion = "*"
-itoa = "*"
 
 [dev-dependencies]
 rand = { version = "*", features = ["small_rng"] }
