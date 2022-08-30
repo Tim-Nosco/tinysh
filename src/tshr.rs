@@ -154,17 +154,18 @@ fn pty_snprintf(
 }
 
 // This function is supposed to mimic the real ptsname_r function
-// without using any formatting functions. Most of the work is moving
-// bytes around without creating any allocations.
+// without using any formatting functions.
 fn no_printf_ptsname_r(
 	fd: c_int,
 	name_buf: &mut [u8],
 ) -> Result<(), PTYNameError> {
+	// Get the tty number
 	let ptsnum: c_int =
 		unsafe { MaybeUninit::zeroed().assume_init() };
 	if 0 != unsafe { libc::ioctl(fd, libc::TIOCGPTN, &ptsnum) } {
 		return Err(PTYNameError::TIOCGPTN);
 	}
+	// Figure out the /dev/pts/{ptsnum} path
 	let ascii_size = pty_snprintf(
 		name_buf,
 		ptsnum.try_into().or(Err(PTYNameError::Cast))?,
@@ -348,7 +349,6 @@ fn main_wrapper(
 				}
 			}
 			// Execute the requested Action
-			//  TODO: match on action and call correct one
 			let sh = b"/bin/sh\0";
 			let mut argv_ptr = [0 as *const c_char; 2];
 			argv_ptr[0] = sh.as_ptr() as *const c_char;
