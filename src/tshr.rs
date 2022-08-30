@@ -19,7 +19,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::prelude::RawFd;
 use std::ptr;
 use thiserror::Error;
-use util::debug;
+use util::{copy_from_slice, debug};
 
 use auxv::getauxval;
 #[allow(unused_imports)]
@@ -108,6 +108,8 @@ enum PTYNameError {
 	NumTooBig,
 	#[error("Unable to ioctl the PTY number.")]
 	TIOCGPTN,
+	#[error("Unable to copy data?")]
+	Copy,
 }
 
 // Special purpose snprintf for determining the PTY name
@@ -119,8 +121,11 @@ fn pty_snprintf(
 	let size = dst_arr.len();
 	// Write in the /dev/pts/ part
 	let mut written = size.min(fmt_str.len() - 2);
-	dst_arr[0..written]
-		.copy_from_slice(fmt_str[..written].as_bytes());
+	copy_from_slice(
+		&mut dst_arr[0..written],
+		fmt_str[..written].as_bytes(),
+	)
+	.or(Err(PTYNameError::Copy))?;
 	// Determine how many digits it's going to take
 	let digits = (i.ilog10() + 1) as usize;
 	// Determine how much of that we can print
