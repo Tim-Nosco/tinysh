@@ -62,7 +62,8 @@ cargo run --bin tshl $ARCH -- key-gen -o key.priv
 cargo run --bin tshl $ARCH -- listen -k key.priv -a "127.0.0.1:2000"
 ```
 
-Then, in a new terminal, you can start the remote side:
+Take note of the public key output by the local client, this is used in the argv of the remote.
+In a new terminal, you can start the remote side:
 
 ```
 # start the remote client
