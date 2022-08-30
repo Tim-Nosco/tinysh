@@ -11,7 +11,7 @@ use std::os::unix::io::AsRawFd;
 use thiserror::Error;
 
 #[allow(unused_imports)]
-use crate::util::debug;
+use crate::util::{copy_from_slice, debug};
 
 // Use this struct to act like a socket with read and write calls
 pub struct RelayNode<R, W> {
@@ -35,11 +35,11 @@ impl<R, W: Write> Write for RelayNode<R, W> {
 
 #[derive(Error, Debug)]
 pub enum IBError {
-	#[error("Error copying memory")]
+	#[error("Unable to copy memory to/from an InternalBuffer")]
 	Copy,
-	#[error("Error encrypting")]
+	#[error("Unable to encrypt the InternalBuffer contents")]
 	Encrypt,
-	#[error("Error Decrypting")]
+	#[error("Unable to decrypt the InternalBuffer contents")]
 	Decrypt,
 }
 
@@ -71,9 +71,11 @@ impl InternalBuf {
 		// self.buf[0..filled-amount]
 		if amount < self.filled {
 			let mut tmp = [0u8; INTERNALBUF_MAX_SIZE];
-			tmp[0..self.filled - amount]
-				.copy_from_slice(&self.buf[amount..self.filled]);
-			self.buf[..].copy_from_slice(&tmp[..]);
+			let _ = copy_from_slice(
+				&mut tmp[0..self.filled - amount],
+				&self.buf[amount..self.filled],
+			);
+			let _ = copy_from_slice(&mut self.buf[..], &tmp[..]);
 		}
 		// Update the remaining data count
 		self.filled = self.filled.saturating_sub(amount);
@@ -139,8 +141,10 @@ impl InternalBuf {
 	// Add a msg to the unfilled part of the buffer if there's room
 	//  otherwise, panic
 	fn extend(&mut self, msg: &[u8]) {
-		self.buf[self.filled..self.filled + msg.len()]
-			.copy_from_slice(&msg);
+		let _ = copy_from_slice(
+			&mut self.buf[self.filled..self.filled + msg.len()],
+			&msg,
+		);
 		self.filled += msg.len();
 	}
 	// Query how much space is left for new data
@@ -219,21 +223,21 @@ impl Default for InternalBuf {
 
 #[derive(Error, Debug)]
 pub enum RelayError {
-	#[error("Cipher")]
+	#[error("Unable to create new cipher")]
 	Cipher,
-	#[error("Cast")]
+	#[error("Unable to cast between types")]
 	Cast,
-	#[error("Poll")]
+	#[error("Poll errored")]
 	Poll,
-	#[error("Read")]
+	#[error("Reading from fd failed")]
 	Read,
-	#[error("Shutdown")]
+	#[error("Remote sent the shutdown hint")]
 	Shutdown,
-	#[error("Write")]
+	#[error("Writing to fd failed")]
 	Write,
-	#[error("Encrypt")]
+	#[error("Unable to encrypt buffer")]
 	Encrypt,
-	#[error("Decrypt")]
+	#[error("Invalid data in buffer to decrypt")]
 	Decrypt,
 }
 

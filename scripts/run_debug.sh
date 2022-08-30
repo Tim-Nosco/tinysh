@@ -21,6 +21,6 @@ cargo run --bin tshl $ARCH -- listen -k key.priv -a "127.0.0.1:2000" &
 sleep 1
 
 # start the remote client
-cargo run --bin tshr $ARCH -- "127.0.0.1" ${KEY} &
+cargo run --bin tshr $ARCH -- "127.0.0.1:2000" ${KEY} &
 
 fg %1

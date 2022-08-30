@@ -3,11 +3,9 @@ mod kex;
 mod relay;
 pub mod util;
 
-use crate::util::debug;
 use anyhow::Result;
 use base64ct::{Base64, Encoding};
 use clap::{Parser, Subcommand};
-use kex::{play_auth_challenge_local, play_dh_kex_local};
 use p256::elliptic_curve::sec1::ToEncodedPoint;
 use p256::SecretKey;
 use rand_core::OsRng;
@@ -16,12 +14,16 @@ use std::io::Write;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 
-// termion bloats the client, but we don't care about the client's size too much.  If need be we
-// can eliminate termion and manually set the client's terminal into raw mode.
-use termion::raw::IntoRawMode;
-
+use crate::util::debug;
+#[allow(unused_imports)]
+use kex::{play_auth_challenge_local, play_dh_kex_local};
 #[allow(unused_imports)]
 use relay::{relay, RelayNode};
+
+// termion bloats the client, but we don't care about the client's
+// size too much.  If need be we can eliminate termion and manually
+// set the client's terminal into raw mode.
+use termion::raw::IntoRawMode;
 
 #[derive(Parser)]
 #[clap(name = "TinySHell")]
@@ -99,17 +101,26 @@ fn handle_client(
 	debug!("Got new connection.");
 	// Get the shared key
 	let key = play_dh_kex_local(conn, secret_l)?;
+
 	// Respond to the challenge
+	#[cfg(feature = "challenge")]
 	play_auth_challenge_local(conn, secret_l)?;
+
 	// Setup the encrypted relay betwen STDIO and the socket
 	let mut local_node = RelayNode {
 		readable: std::io::stdin(),
 		writeable: std::io::stdout().into_raw_mode().unwrap(),
 	};
-    match relay(&mut local_node, conn, &key, &mut OsRng) {
-        Ok(_) => {debug!("Client finished relay"); ()},
-        Err(e) => {debug!("Client error: {:?}", e); ()},
-    }
+	match relay(&mut local_node, conn, &key, &mut OsRng) {
+		Ok(_) => {
+			debug!("Client finished relay");
+			()
+		}
+		Err(e) => {
+			debug!("Client error: {:?}", e);
+			()
+		}
+	}
 
 	Ok(())
 }

@@ -1,21 +1,34 @@
 #!/bin/bash
 
-MIPSEL=mipsel-linux-musl-cross.tgz
-if [ ! -f $MIPSEL ]; then
-    wget https://musl.cc/mipsel-linux-musl-cross.tgz && tar xzf mipsel-linux-musl-cross.tgz
+if [ -z "${ARCH}" ]
+then
+    ARCH=mipsel
+fi
+if [ -z "${LIBC}" ]
+then
+    LIBC=musl
+fi
+
+TOOLCHAIN=${ARCH}-linux-${LIBC}-cross
+TRIPLE=${ARCH}-unknown-linux-${LIBC}
+
+if [ ! -f ${TOOLCHAIN}.tgz ]; then
+    wget https://musl.cc/${TOOLCHAIN}.tgz && tar xzf ${TOOLCHAIN}
 fi
 
 cargo build \
-    --target mipsel-unknown-linux-musl \
+    --target ${TRIPLE} \
     --bin tshr \
     --release \
     -Zbuild-std=std,core,alloc,panic_abort \
     -Zbuild-std-features=panic_immediate_abort
 
+HOST=$(rustc -vV | grep -oP '(?<=host: ).*$')
+
 cargo build \
-    --target x86_64-unknown-linux-gnu \
+    --target ${HOST} \
     --bin tshl \
     --release
 
-du -h ./target/mipsel-unknown-linux-musl/release/tshr
-du -h ./target/x86_64-unknown-linux-gnu/release/tshl
+du -h ./target/${TRIPLE}/release/tshr
+du -h ./target/${HOST}/release/tshl

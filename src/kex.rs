@@ -1,6 +1,6 @@
 #![allow(dead_code)]
 
-use crate::util::debug;
+use crate::util::{copy_from_slice, debug};
 #[allow(unused_imports)]
 use anyhow::anyhow;
 use p256::ecdh::{diffie_hellman, EphemeralSecret};
@@ -18,16 +18,16 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum KexError {
-	#[error("play_dh_kex error")]
-	KeyDecode,
-	#[error("write error")]
+	#[error("Unable to write")]
 	Write,
-	#[error("read error")]
+	#[error("Unable to read")]
 	Read,
-	#[error("challenge error")]
+	#[error("Failed challenge")]
 	Challenge,
-	#[error("calc shared secret")]
+	#[error("Unable to calculate shared secret")]
 	CalcSharedSecret,
+	#[error("Error copying data.")]
+	Copy,
 }
 
 pub fn gen_key(seed: Option<u64>) -> EphemeralSecret {
@@ -56,10 +56,17 @@ pub fn play_dh_kex_remote<A: Write>(
 	let mut pub_r_fixed_size = [0u8; ENCODED_SEC1_LEN];
 	let pub_r = secret_r.public_key().to_encoded_point(true);
 	let size_size = PUB_SIZE_FIELD;
-	pub_r_fixed_size[size_size - ARCH_SIZE..size_size]
-		.copy_from_slice(&pub_r.as_bytes().len().to_be_bytes());
-	pub_r_fixed_size[size_size..size_size + pub_r.as_bytes().len()]
-		.copy_from_slice(&pub_r.as_bytes());
+	copy_from_slice(
+		&mut pub_r_fixed_size[size_size - ARCH_SIZE..size_size],
+		&pub_r.as_bytes().len().to_be_bytes(),
+	)
+	.or(Err(KexError::Copy))?;
+	copy_from_slice(
+		&mut pub_r_fixed_size
+			[size_size..size_size + pub_r.as_bytes().len()],
+		&pub_r.as_bytes(),
+	)
+	.or(Err(KexError::Copy))?;
 	// Send public key to local
 	writeable
 		.write(&pub_r_fixed_size)
