@@ -187,10 +187,14 @@ enum RemoteError {
 	#[error("Auth challenge")]
 	#[allow(dead_code)]
 	Challenge,
-	#[error("Unable to open PTY")]
-	LibcPTY,
 	#[error("Unable to fork")]
 	LibcFork,
+	#[error("Unable to open file")]
+	LibcOpen,
+	#[error("Unable to create a pty")]
+	PTY,
+	#[error("Unable to register SIGCHLD")]
+	SIGCHLD,
 	#[error("libc error")]
 	Libc,
 }
@@ -275,15 +279,15 @@ fn main_wrapper(
 	// Get a master pseudoterminal file descriptor
 	let master = unsafe { libc::posix_openpt(libc::O_RDWR) };
 	if master < 0 {
-		panic!("Unable to posix_openpt");
+		return Err(RemoteError::PTY);
 	}
 	// Register a slave pseudoterminal to this master
 	if 0 > unsafe { libc::grantpt(master) } {
-		panic!("Unable to grantpt");
+		return Err(RemoteError::PTY);
 	}
 	// Unlock the previously registered slave, allowing us to open it
 	if 0 > unsafe { libc::unlockpt(master) } {
-		panic!("Unable to unlockpt");
+		return Err(RemoteError::PTY);
 	}
 
 	// Fork so we can do both the relay and the requested action
@@ -301,7 +305,7 @@ fn main_wrapper(
 			let mut slave_name: [u8; 64] =
 				unsafe { MaybeUninit::zeroed().assume_init() };
 			no_printf_ptsname_r(master, &mut slave_name)
-				.expect("Unable to generate pty name.");
+				.or(Err(RemoteError::PTY))?;
 			// Open it
 			let slave = unsafe {
 				libc::open(
@@ -309,6 +313,9 @@ fn main_wrapper(
 					libc::O_RDWR,
 				)
 			};
+			if 0 > slave {
+				return Err(RemoteError::LibcOpen);
+			}
 			// Establish this pid as the process tree root
 			if 0 > unsafe { libc::setsid() } {
 				return Err(RemoteError::Libc);
@@ -365,15 +372,15 @@ fn main_wrapper(
 				}
 			};
 			// Register the action
-			if -1
-				== unsafe {
-					libc::sigaction(
-						libc::SIGCHLD,
-						&sigact,
-						ptr::null_mut(),
-					)
-				} {
-				panic!("Unable to register SIGCHLD");
+			if unsafe {
+				libc::sigaction(
+					libc::SIGCHLD,
+					&sigact,
+					ptr::null_mut(),
+				)
+			} == -1
+			{
+				return Err(RemoteError::SIGCHLD);
 			}
 			// Start up the relay
 			let mut node1 = RelayNode {
