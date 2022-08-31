@@ -23,10 +23,10 @@ Then, it calls the remote's `/bin/sh`, piping `STDIO` over the relay.
 | Target Triple                     | Size      |
 | --------------------------------- | --------- |
 | mips64el-unknown-linux-muslabi64  | 88K       |
-| mips-unknown-linux-musl           | 88K       |
-| mipsel-unknown-linux-musl         | 88K       |
-| i686-unknown-linux-musl           | 76K       |
 | mips64-unknown-linux-muslabi64    | 88K       |
+| mipsel-unknown-linux-musl         | 88K       |
+| mips-unknown-linux-musl           | 88K       |
+| i686-unknown-linux-musl           | 76K       |
 | x86\_64-unknown-linux-musl        | 76K       |
 | aarch64-unknown-linux-musl        | 56K       |
 | arm-unknown-linux-musleabi        | 68K       |
@@ -48,7 +48,7 @@ After you have that, you should be able to use the build script above.
 
 ### Building for all arches
 
-To do this, use the helper script `scripts/build_all.sh`
+To do this, use the helper script `scripts/buildall.sh`
 
 ### Building for development
 
