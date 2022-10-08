@@ -42,5 +42,4 @@ for rust_target in "${!rust2musl[@]}"; do
         --release -q
 
     du -h "./target/$rust_target/release/tshr"
-    echo ""
 done
