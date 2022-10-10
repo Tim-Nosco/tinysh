@@ -1,6 +1,3 @@
-[target.mipsel-unknown-linux-uclibc]
-linker = "mipsel-buildroot-linux-uclibc-gcc"
-
 [target.mipsel-unknown-linux-musl]
 linker = "mipsel-linux-musl-cross/bin/mipsel-linux-musl-gcc"
 rustflags = ["-Ctarget-feature=+crt-static"]
