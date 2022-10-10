@@ -4,8 +4,6 @@
 set -euo pipefail
 
 # Map the rust target triple we support to the musl version of the triple.
-# Note that each rust target we specify must also be listed in the
-# rust-toolchain.toml file, under 'targets'
 declare -A rust2musl
 rust2musl[aarch64-unknown-linux-musl]=aarch64-linux-musl
 rust2musl[arm-unknown-linux-musleabi]=arm-linux-musleabi
@@ -23,6 +21,7 @@ for rust_target in "${!rust2musl[@]}"; do
     url="https://musl.cc/$tarball"
 
     if [ ! -d "$sysrootdir" ]; then
+        echo "[+] installing $rust_target toolchain"
         if [ ! -f "$tarball" ]; then
             wget -q "$url" && tar xzf "$tarball"
         else
@@ -30,14 +29,11 @@ for rust_target in "${!rust2musl[@]}"; do
         fi
     fi
 
-    compiler="$musltriple-gcc"
-    export RUSTFLAGS="-Ctarget-feature=+crt-static"
     echo "[+] compiling $rust_target"
     cargo build \
-        --config "target.$rust_target.linker=\"$sysrootdir/bin/$compiler\"" \
         --target "$rust_target" \
         --bin tshr \
-        -Zbuild-std=std,core,alloc,panic_abort \
+        -Zbuild-std=std,core,panic_abort \
         -Zbuild-std-features=panic_immediate_abort \
         --release -q
 
