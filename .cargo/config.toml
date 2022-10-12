@@ -1,4 +1,4 @@
-[build]
+[target.'cfg(all(target_env = "musl"))']
 rustflags = ["-Ctarget-feature=+crt-static"]
 
 [target.aarch64-unknown-linux-musl]
