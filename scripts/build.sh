@@ -20,7 +20,7 @@ cargo build \
     --target ${TRIPLE} \
     --bin tshr \
     --release \
-    -Zbuild-std=std,core,alloc,panic_abort \
+    -Zbuild-std=std,core,panic_abort \
     -Zbuild-std-features=panic_immediate_abort
 
 HOST=$(rustc -vV | grep -oP '(?<=host: ).*$')
@@ -28,7 +28,7 @@ HOST=$(rustc -vV | grep -oP '(?<=host: ).*$')
 cargo build \
     --target ${HOST} \
     --bin tshl \
-    --release
+    --release \
 
 du -h ./target/${TRIPLE}/release/tshr
 du -h ./target/${HOST}/release/tshl
