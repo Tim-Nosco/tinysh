@@ -12,20 +12,29 @@ rust2musl[mips64el-unknown-linux-muslabi64]=mips64el-linux-musl
 rust2musl[mipsel-unknown-linux-musl]=mipsel-linux-musl
 rust2musl[x86_64-unknown-linux-musl]=x86_64-linux-musl
 
-install_musl_toolchains() {
-    for rust_target in "${!rust2musl[@]}"; do
-        musltriple="${rust2musl[$rust_target]}"
-        sysrootdir="$musltriple-cross"
-        tarball="$sysrootdir.tgz"
-        url="https://musl.cc/$tarball"
+download_musl_toolchain() {
+    rust_target="$1"
+    if [ ! ${rust2musl[$rust_target]+_} ]; then
+        echo "[-] $rust_target not in supported target list"
+        exit 1
+    fi
+    musltriple="${rust2musl[$rust_target]}"
+    sysrootdir="$musltriple-cross"
+    tarball="$sysrootdir.tgz"
+    url="https://musl.cc/$tarball"
 
-        if [ ! -d "$sysrootdir" ]; then
-            echo "[+] installing $rust_target toolchain"
-            if [ ! -f "$tarball" ]; then
-                wget -q "$url" && tar xzf "$tarball"
-            else
-                tar xzf "$tarball"
-            fi
+    if [ ! -d "$sysrootdir" ]; then
+        echo "[+] installing $rust_target toolchain"
+        if [ ! -f "$tarball" ]; then
+            wget -q "$url" && tar xzf "$tarball"
+        else
+            tar xzf "$tarball"
         fi
+    fi
+}
+
+download_all_musl_toolchains() {
+    for rust_target in "${!rust2musl[@]}"; do
+        download_musl_toolchain $rust_target
     done
 }
