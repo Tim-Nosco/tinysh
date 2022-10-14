@@ -2,7 +2,7 @@
 
 TinySH is a statically-compiled UNIX backdoor written in the rust programming language.
 We agressively optimize for size and have selected a minimal set of features 
-to securly administer a remote system.
+to securely administer a remote system.
 
 ## Overview
 
