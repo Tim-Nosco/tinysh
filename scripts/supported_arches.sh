@@ -38,3 +38,14 @@ download_all_musl_toolchains() {
         download_musl_toolchain $rust_target
     done
 }
+
+# Allow us to call download_all_musl_toolchains by providing the function name
+# on the command line.
+arg=${1:-}
+case "$arg" in
+    download_all_musl_toolchains)
+        download_all_musl_toolchains
+        ;;
+    *)
+        ;;
+esac
