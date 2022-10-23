@@ -44,7 +44,7 @@ Docker image instead of in your standard environment.
 
 ```bash
 docker build -t tinysh-build .
-docker run --rm -it -v $PWD:/root tinysh ./scripts/build.sh <supported rust target triple> 
+docker run --rm -it -v $PWD:/root tinysh-build ./scripts/build.sh <supported rust target triple> 
 ```
 
 ### Build using a script
