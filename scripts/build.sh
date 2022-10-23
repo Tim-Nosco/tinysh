@@ -1,34 +1,33 @@
 #!/bin/bash
+# Build the remote and local binaries.
+# Build the remote for the specified target (defaulting to
+# mipsel-unknown-linux-musl), and build the local for the host target.
+set -euo pipefail
 
-if [ -z "${ARCH}" ]
+TARGET=${1:-}
+if [ -z "${TARGET}" ]
 then
-    ARCH=mipsel
-fi
-if [ -z "${LIBC}" ]
-then
-    LIBC=musl
+    TARGET="mipsel-unknown-linux-musl"
 fi
 
-TOOLCHAIN=${ARCH}-linux-${LIBC}-cross
-TRIPLE=${ARCH}-unknown-linux-${LIBC}
+# shellcheck source=scripts/supported_arches.sh
+source "$(dirname "$0")/supported_arches.sh"
 
-if [ ! -f ${TOOLCHAIN}.tgz ]; then
-    wget https://musl.cc/${TOOLCHAIN}.tgz && tar xzf ${TOOLCHAIN}
-fi
+download_musl_toolchain $TARGET
 
 cargo build \
-    --target ${TRIPLE} \
+    --target "${TARGET}" \
     --bin tshr \
     --release \
-    -Zbuild-std=std,core,alloc,panic_abort \
+    -Zbuild-std=std,core,panic_abort \
     -Zbuild-std-features=panic_immediate_abort
 
-HOST=$(rustc -vV | grep -oP '(?<=host: ).*$')
+host=$(rustc -vV | grep -oP '(?<=host: ).*$')
 
 cargo build \
-    --target ${HOST} \
+    --target "${host}" \
     --bin tshl \
     --release
 
-du -h ./target/${TRIPLE}/release/tshr
-du -h ./target/${HOST}/release/tshl
+du -h "./target/${TARGET}/release/tshr"
+du -h "./target/${host}/release/tshl"

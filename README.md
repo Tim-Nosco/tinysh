@@ -2,7 +2,7 @@
 
 TinySH is a statically-compiled UNIX backdoor written in the rust programming language.
 We agressively optimize for size and have selected a minimal set of features 
-to securly administer a remote system.
+to securely administer a remote system.
 
 ## Overview
 
@@ -33,22 +33,53 @@ Then, it calls the remote's `/bin/sh`, piping `STDIO` over the relay.
 
 ## Building
 
-You can use `docker` to build TSH by running: 
+If you want to build TSH from source (instead of downloading from the official
+release), it requires some setup to make sure the resulting binary is as small
+as possible. In order of least to most amount of work on your part:
 
-`./scripts/docker.sh`
+### Build in a Docker container
 
-and then
+The main benefit is that all the toolchains and rust components end up in a
+Docker image instead of in your standard environment.
 
-`ARCH='x86_64' LIBC='musl' ./scripts/build.sh`
+```bash
+docker build -t tinysh-build .
+docker run --rm -it -v $PWD:/root tinysh ./scripts/build.sh <supported rust target triple> 
+```
 
-Ensure to change the `ARCH` and `LIBC` variables to match your desired build from the table above.
+### Build using a script
 
-If you don't have docker, you'll need [rustup](https://rustup.rs/). 
-After you have that, you should be able to use the build script above.
+If you're fine with downloading musl toolchains and updating your rust
+installation, you can just use our build script directly.
 
-### Building for all arches
+```bash
+./scripts/build.sh <supported rust target triple>
+```
 
-To do this, use the helper script `scripts/buildall.sh`
+### Build manually
+
+Want to run `cargo` yourself? You can do that too.
+
+```bash
+# To build the remote side
+cargo build \
+    --target <supported rust target> \
+    --bin tshr \
+    --release \
+    -Zbuild-std=std,core,panic_abort \
+    -Zbuild-std-features=panic_immediate_abort
+# To build the local side
+cargo build --bin tshl --release
+```
+
+## For Contributors
+
+We have a few scripts that you can use to make development and testing easier.
+
+### Building for all targets
+
+Quickly test that the remote still builds for all supported targets by running
+`./scripts/build_remote_all_arches.sh`.
 
 ### Building for development
 
@@ -69,6 +100,12 @@ In a new terminal, you can start the remote side:
 # start the remote client
 cargo run --bin tshr $ARCH -- "127.0.0.1:2000" ${KEY}
 ```
+
+### Check what's taking all that space
+
+Use `./scripts/bloat.sh` to compile the remote and get a report on what
+sections use the most space in the binary. (You'll need to install the `cargo
+bloat` tool with `cargo install cargo-bloat`.)
 
 ## Other Notes
 

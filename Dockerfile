@@ -1,14 +1,9 @@
-from ubuntu:22.04
+from rust:latest
 
-run apt update && apt install -y \
-    curl \
-    gcc \
-    file \
-    qemu-user-static
+workdir /root
+copy . ./
 
-# Install rustup
-run curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | \
-    sh -s -- --default-toolchain none -y
-run /root/.cargo/bin/rustup toolchain install nightly --allow-downgrade --profile minimal --component rust-src
-
-workdir /opt/tinysh
+# trigger downloading all the components specified in the toolchain file
+run rustup target list
+# download all the musl toolchains we support
+run ./scripts/supported_arches.sh download_all_musl_toolchains
